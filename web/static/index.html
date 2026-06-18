@@ -1,0 +1,1149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dota 眼位视野查询</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f141b;
+      --panel: #161d27;
+      --panel2: #1d2633;
+      --line: #2d3948;
+      --text: #eef4fb;
+      --muted: #9fafc1;
+      --green: #42d276;
+      --blue: #50b4ff;
+      --gold: #f6c35b;
+      --red: #ee5252;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+    }
+    body {
+      margin: 0;
+      color: var(--text);
+      background: radial-gradient(circle at top, #17202b 0, var(--bg) 42rem);
+    }
+    main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 28px 20px 54px;
+    }
+    h1, h2, h3 { margin: 0; }
+    .subtitle { color: var(--muted); margin-top: 8px; line-height: 1.6; }
+    .panel {
+      background: rgba(22, 29, 39, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      margin-top: 18px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+    }
+    .form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+    label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #111821;
+      color: var(--text);
+      padding: 11px 12px;
+      font-size: 15px;
+      outline: none;
+    }
+    button {
+      border: 1px solid #3d4c61;
+      border-radius: 10px;
+      background: #223047;
+      color: var(--text);
+      padding: 11px 15px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.primary {
+      background: linear-gradient(135deg, #2f7dff, #2bbd84);
+      border: 0;
+      font-weight: 700;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .checkline {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      min-height: 42px;
+      white-space: nowrap;
+    }
+    .checkline input {
+      width: auto;
+    }
+    .status {
+      min-height: 22px;
+      color: var(--muted);
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    .error { color: #ff9b9b; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .card {
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 15px;
+    }
+    .label { color: var(--muted); font-size: 13px; }
+    .value { font-size: 28px; font-weight: 800; margin-top: 6px; }
+    .match-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .match-item {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #121923;
+      padding: 12px;
+    }
+    .match-title { font-weight: 700; }
+    .match-meta { color: var(--muted); font-size: 12px; margin-top: 5px; line-height: 1.5; }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .small-input {
+      width: 86px;
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+    .match {
+      background: rgba(22, 29, 39, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      margin-top: 18px;
+      overflow: hidden;
+    }
+    .match-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px;
+      background: var(--panel2);
+      border-bottom: 1px solid var(--line);
+    }
+    .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      background: rgba(255,255,255,0.02);
+    }
+    tr:last-child td { border-bottom: 0; }
+    .hero-name { font-weight: 700; }
+    .muted { color: var(--muted); }
+    .bar {
+      height: 9px;
+      border-radius: 999px;
+      background: #263242;
+      overflow: hidden;
+      margin-top: 7px;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--green), var(--blue));
+    }
+    details summary {
+      color: var(--blue);
+      cursor: pointer;
+      user-select: none;
+    }
+    .segments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 9px;
+      max-width: 440px;
+    }
+    .segment {
+      background: #243044;
+      border: 1px solid #34445a;
+      border-radius: 8px;
+      padding: 4px 7px;
+      font-size: 12px;
+      color: #dce8f5;
+    }
+    .segment.invisible {
+      border-color: rgba(246, 195, 91, 0.8);
+      color: var(--gold);
+    }
+    .section-title {
+      padding: 18px 18px 0;
+      font-size: 17px;
+      font-weight: 800;
+    }
+    .map-panel {
+      padding: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .map-controls {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+      margin: 12px 0;
+    }
+    .map-canvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #07090b;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 10px;
+    }
+    .dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+    .result-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .time-presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .time-presets button {
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+    tr.clickable {
+      cursor: pointer;
+    }
+    tr.clickable:hover {
+      background: rgba(80, 180, 255, 0.08);
+    }
+    .filter-pill {
+      color: var(--gold);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .tier {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      margin-left: 6px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+    .tier.high {
+      color: #b7ffd0;
+      border-color: rgba(66, 210, 118, 0.8);
+      background: rgba(66, 210, 118, 0.12);
+    }
+    .tier.low, .tier.none {
+      color: #ffb7b7;
+      border-color: rgba(238, 82, 82, 0.8);
+      background: rgba(238, 82, 82, 0.12);
+    }
+    .map-option {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 860px) {
+      .form { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .match-head { display: block; }
+      .map-controls { grid-template-columns: 1fr; }
+      table { font-size: 13px; }
+      th, td { padding: 10px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Dota 眼位视野查询</h1>
+    <div class="subtitle">
+      输入队伍 tag，选择一场或多场比赛，计算该队通过 Observer/Sentry 眼位看到敌方英雄的秒数和出现次数。
+    </div>
+
+    <section class="panel">
+      <div class="form">
+        <div>
+          <label for="teamTag">队伍 Tag</label>
+          <input id="teamTag" value="KRD" placeholder="例如 KRD / AMG" />
+        </div>
+        <div>
+          <label for="limit">比赛数量</label>
+          <input id="limit" type="number" min="1" max="200" value="50" />
+        </div>
+        <div>
+          <label for="opponentTag">对手 Tag</label>
+          <input id="opponentTag" placeholder="可选，例如 AMG" />
+        </div>
+        <div>
+          <label for="patchVersion">版本</label>
+          <input id="patchVersion" placeholder="可选，例如 7.41" />
+        </div>
+        <div>
+          <label for="league">联赛关键词</label>
+          <input id="league" placeholder="可选" />
+        </div>
+        <div>
+          <label for="startTime">开始秒</label>
+          <input id="startTime" type="number" placeholder="-80" />
+        </div>
+        <div>
+          <label for="endTime">结束秒</label>
+          <input id="endTime" type="number" placeholder="默认比赛时长" />
+        </div>
+        <label class="checkline">
+          <input id="forceRefresh" type="checkbox" />
+          强制重算
+        </label>
+        <label class="checkline">
+          <input id="compareBothSides" type="checkbox" />
+          同时计算双方
+        </label>
+        <button id="loadMatches">查询比赛</button>
+        <button id="compute" class="primary" disabled>计算选中比赛</button>
+      </div>
+      <div class="time-presets">
+        <button data-time-preset="-80,0">赛前 -80~0</button>
+        <button data-time-preset="0,600">0~10 分钟</button>
+        <button data-time-preset="600,1200">10~20 分钟</button>
+        <button data-time-preset="1200,1800">20~30 分钟</button>
+        <button data-time-preset="1800,">30 分钟以后</button>
+        <button data-time-preset=",">整场默认</button>
+      </div>
+      <div id="status" class="status"></div>
+      <div class="toolbar" id="matchToolbar" style="display:none">
+        <div class="muted"><span id="matchCount">0</span> 场比赛，已选 <span id="selectedCount">0</span> 场</div>
+        <div class="toolbar-actions">
+          <input id="recentCount" class="small-input" type="number" min="1" value="5" />
+          <button id="selectRecent">选最近 N 场</button>
+          <button id="selectAll">全选</button>
+          <button id="clearAll">清空</button>
+        </div>
+      </div>
+      <div id="matches" class="match-list"></div>
+    </section>
+
+    <section id="result"></section>
+  </main>
+
+  <script>
+    const state = {
+      matches: [],
+      selected: new Set(),
+      report: null,
+      mapImage: null,
+      mapTimers: new Map(),
+      mapFilters: new Map(),
+    };
+
+    const el = {
+      teamTag: document.getElementById("teamTag"),
+      limit: document.getElementById("limit"),
+      opponentTag: document.getElementById("opponentTag"),
+      patchVersion: document.getElementById("patchVersion"),
+      league: document.getElementById("league"),
+      startTime: document.getElementById("startTime"),
+      endTime: document.getElementById("endTime"),
+      loadMatches: document.getElementById("loadMatches"),
+      compute: document.getElementById("compute"),
+      forceRefresh: document.getElementById("forceRefresh"),
+      compareBothSides: document.getElementById("compareBothSides"),
+      status: document.getElementById("status"),
+      matches: document.getElementById("matches"),
+      matchToolbar: document.getElementById("matchToolbar"),
+      matchCount: document.getElementById("matchCount"),
+      selectedCount: document.getElementById("selectedCount"),
+      recentCount: document.getElementById("recentCount"),
+      selectRecent: document.getElementById("selectRecent"),
+      selectAll: document.getElementById("selectAll"),
+      clearAll: document.getElementById("clearAll"),
+      result: document.getElementById("result"),
+    };
+
+    function setStatus(message, isError = false) {
+      el.status.textContent = message || "";
+      el.status.className = isError ? "status error" : "status";
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || `请求失败：${response.status}`);
+      }
+      return payload;
+    }
+
+    function fmtTime(value) {
+      const sign = value < 0 ? "-" : "";
+      value = Math.abs(value);
+      return `${sign}${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
+    }
+
+    function parserWorld(x, y) {
+      return [Number(x) * 128 - 16384, Number(y) * 128 - 16384];
+    }
+
+    function worldPx(wx, wy) {
+      const map = state.report && state.report.source ? state.report.source.map : null;
+      const calibration = map ? map.projectionCalibration : null;
+      if (!calibration || !calibration.affine || !state.mapImage) return [0, 0];
+      const affine = calibration.affine;
+      const sx = state.mapImage.naturalWidth / (calibration.imageWidth || state.mapImage.naturalWidth);
+      const sy = state.mapImage.naturalHeight / (calibration.imageHeight || state.mapImage.naturalHeight);
+      return [
+        (affine.a * wx + affine.b * wy + affine.c) * sx,
+        (affine.d * wx + affine.e * wy + affine.f) * sy,
+      ];
+    }
+
+    function parserPx(x, y) {
+      const [wx, wy] = parserWorld(x, y);
+      return worldPx(wx, wy);
+    }
+
+    function gridCellWorld(gx, gy) {
+      const map = state.report && state.report.source ? state.report.source.map : null;
+      const grid = map ? map.visionGrid : null;
+      const cellSize = grid ? grid.cellSize : 64;
+      const offset = grid ? grid.cellCenterOffset : 0.5;
+      const originX = grid ? grid.originX : -9472;
+      const originY = grid ? grid.originY : -9472;
+      return [
+        originX + (Number(gx) + offset) * cellSize,
+        originY + (Number(gy) + offset) * cellSize,
+      ];
+    }
+
+    function gridCellPx(gx, gy) {
+      const [wx, wy] = gridCellWorld(gx, gy);
+      return worldPx(wx, wy);
+    }
+
+    function gridCellRadiusPx(gx, gy) {
+      const map = state.report && state.report.source ? state.report.source.map : null;
+      const grid = map ? map.visionGrid : null;
+      const cellSize = grid ? grid.cellSize : 64;
+      const [wx, wy] = gridCellWorld(gx, gy);
+      const [cx, cy] = worldPx(wx, wy);
+      const [x2, y2] = worldPx(wx + cellSize, wy);
+      const [x3, y3] = worldPx(wx, wy + cellSize);
+      return Math.max(1, (Math.hypot(cx - x2, cy - y2) + Math.hypot(cx - x3, cy - y3)) / 2);
+    }
+
+    function cleanHeroName(name) {
+      return String(name || "")
+        .replace("npc_dota_hero_", "")
+        .split("_")
+        .map(part => part ? part[0].toUpperCase() + part.slice(1) : part)
+        .join(" ");
+    }
+
+    function renderMatches() {
+      el.matchToolbar.style.display = state.matches.length ? "flex" : "none";
+      el.matchCount.textContent = state.matches.length;
+      el.selectedCount.textContent = state.selected.size;
+      el.compute.disabled = state.selected.size === 0;
+      el.matches.innerHTML = state.matches.map(match => {
+        const checked = state.selected.has(match.matchId) ? "checked" : "";
+        const duration = match.duration == null ? "未知" : `${match.duration}s`;
+        return `<label class="match-item">
+          <input type="checkbox" data-match-id="${match.matchId}" ${checked} />
+          <div>
+            <div class="match-title">${match.radiantTeamTag} vs ${match.direTeamTag}</div>
+            <div class="match-meta">
+              Match ${match.matchId} · ${match.teamSide}<br />
+              ${match.startDate || ""} · ${duration}<br />
+              ${match.leagueName || ""}
+            </div>
+          </div>
+        </label>`;
+      }).join("");
+      for (const input of el.matches.querySelectorAll("input[type=checkbox]")) {
+        input.addEventListener("change", () => {
+          const id = Number(input.dataset.matchId);
+          if (input.checked) state.selected.add(id);
+          else state.selected.delete(id);
+          renderMatches();
+        });
+      }
+    }
+
+    function card(label, value) {
+      return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function renderSegments(hero) {
+      if (!hero.segments || !hero.segments.length) return '<span class="muted">无可见区间</span>';
+      const segments = hero.segments.map(segment => {
+        const cls = segment.invisible ? "segment invisible" : "segment";
+        const suffix = segment.invisible ? " 隐身" : "";
+        return `<span class="${cls}">${fmtTime(segment.start)}-${fmtTime(segment.end - 1)} · ${segment.duration}s${suffix}</span>`;
+      }).join("");
+      return `<details><summary>查看 ${hero.segments.length} 个区间</summary><div class="segments">${segments}</div></details>`;
+    }
+
+    function renderWardHeroes(ward) {
+      if (!ward.heroes || !ward.heroes.length) return '<span class="muted">无命中英雄</span>';
+      const heroes = ward.heroes.map(hero => {
+        const invisible = hero.invisibleVisibleSeconds ? `，隐身 ${hero.invisibleVisibleSeconds}s` : "";
+        return `${cleanHeroName(hero.heroName)} ${hero.visibleSeconds}s / ${hero.appearances}次${invisible}`;
+      }).join("<br />");
+      return `<details><summary>查看 ${ward.heroes.length} 个英雄</summary><div class="muted" style="margin-top:8px;line-height:1.7">${heroes}</div></details>`;
+    }
+
+    function renderHeroWardContributors(hero) {
+      const wards = hero.wardContributors || [];
+      if (!wards.length) return '<span class="muted">无来源眼位</span>';
+      const html = wards.map(ward => {
+        const endText = ward.end == null ? "结束" : fmtTime(ward.end);
+        const invisible = ward.invisibleVisibleSeconds ? `，隐身 ${ward.invisibleVisibleSeconds}s` : "";
+        return `<div style="margin-bottom:8px">
+          <strong>ehandle ${ward.ehandle}</strong>
+          <span class="muted"> · ${fmtTime(ward.start)}-${endText} · slot ${ward.slot}</span><br />
+          <span class="muted">${ward.visibleSeconds}s / ${ward.appearances}次${invisible}</span>
+        </div>`;
+      }).join("");
+      return `<details><summary>查看 ${wards.length} 个眼位</summary><div class="muted" style="margin-top:8px;line-height:1.6">${html}</div></details>`;
+    }
+
+    function renderWardContributions(match) {
+      const wards = [...(match.observerContributions || [])].sort((a, b) => b.heroSeconds - a.heroSeconds);
+      if (!wards.length) return "";
+      const maxSeconds = Math.max(1, ...wards.map(ward => ward.heroSeconds || 0));
+      const rows = wards.map((ward, index) => {
+        const pct = Math.round((ward.heroSeconds || 0) / maxSeconds * 100);
+        const endText = ward.end == null ? "结束" : fmtTime(ward.end);
+        const tierText = {
+          high: "高价值",
+          normal: "普通",
+          low: "低价值",
+          none: "无收益",
+        }[ward.valueTier] || "普通";
+        return `<tr class="clickable" data-filter-match="${match.matchId}" data-filter-type="ward" data-filter-value="${ward.ehandle}">
+          <td>
+            <div class="hero-name">#${index + 1} · ehandle ${ward.ehandle}<span class="tier ${ward.valueTier || "normal"}">${tierText}</span></div>
+            <div class="muted">${fmtTime(ward.start)}-${endText} · slot ${ward.slot} · ${ward.valueReason || ""}</div>
+          </td>
+          <td>
+            <strong>${ward.heroSeconds}</strong>
+            <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+          </td>
+          <td>${ward.uniqueHeroes}</td>
+          <td>${ward.appearances}</td>
+          <td>${ward.lifetimeSeconds}</td>
+          <td>${(ward.efficiency * 100).toFixed(1)}%</td>
+          <td>${renderWardHeroes(ward)}</td>
+        </tr>`;
+      }).join("");
+      return `<div class="section-title">Observer 眼位贡献排行</div>
+        <table>
+          <thead>
+            <tr>
+              <th>眼位</th>
+              <th>贡献秒数</th>
+              <th>命中英雄</th>
+              <th>出现次数</th>
+              <th>存活秒数</th>
+              <th>效率</th>
+              <th>英雄明细</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function renderMapPanel(match) {
+      const start = match.timeWindow.start;
+      const end = match.timeWindow.end;
+      return `<div class="map-panel" data-match-id="${match.matchId}">
+        <div class="section-title" style="padding:0">地图时间轴</div>
+        <div class="subtitle">显示当前秒活跃眼位，以及该秒被这些眼看到的敌方英雄。</div>
+        <div class="map-controls">
+          <button data-map-play="${match.matchId}">播放</button>
+          <input data-map-slider="${match.matchId}" type="range" min="${start}" max="${end}" value="${start}" step="1" />
+          <strong data-map-clock="${match.matchId}">${fmtTime(start)}</strong>
+          <span class="muted" data-map-count="${match.matchId}"></span>
+        </div>
+        <div class="toolbar-actions">
+          <span class="filter-pill" data-map-filter-label="${match.matchId}">地图筛选：全部</span>
+          <label class="map-option"><input data-map-show-vision="${match.matchId}" type="checkbox" checked />显示眼位视野</label>
+          <label class="map-option"><input data-map-high-only="${match.matchId}" type="checkbox" />只显示高价值眼</label>
+          <button data-map-clear="${match.matchId}">清除地图筛选</button>
+        </div>
+        <canvas class="map-canvas" data-map-canvas="${match.matchId}"></canvas>
+        <div class="legend">
+          <span><i class="dot" style="background:#42d276"></i>Observer</span>
+          <span><i class="dot" style="background:#b7ffd0"></i>高价值 Observer 光环</span>
+          <span><i class="dot" style="background:rgba(66,210,118,0.45)"></i>当前眼位视野</span>
+          <span><i class="dot" style="background:#50b4ff"></i>Sentry</span>
+          <span><i class="dot" style="background:#ee5252"></i>被看到英雄</span>
+          <span><i class="dot" style="background:#f6c35b"></i>隐身且被真视看到</span>
+        </div>
+      </div>`;
+    }
+
+    function renderMatchResult(match) {
+      const heroes = [...(match.enemyHeroes || [])].sort((a, b) => b.visibleSeconds - a.visibleSeconds);
+      const maxSeconds = Math.max(1, ...heroes.map(hero => hero.visibleSeconds || 0));
+      const valueSummary = match.observerValueSummary || {};
+      const rows = heroes.map(hero => {
+        const pct = Math.round((hero.visibleSeconds || 0) / maxSeconds * 100);
+        return `<tr class="clickable" data-filter-match="${match.matchId}" data-filter-type="hero" data-filter-value="${hero.slot}">
+          <td>
+            <div class="hero-name">${cleanHeroName(hero.heroName)}</div>
+            <div class="muted">${hero.persona || ""} · slot ${hero.slot}</div>
+          </td>
+          <td>
+            <strong>${hero.visibleSeconds}</strong>
+            <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+          </td>
+          <td>${hero.appearances}</td>
+          <td>${hero.invisibleVisibleSeconds}</td>
+          <td>${renderSegments(hero)}</td>
+          <td>${renderHeroWardContributors(hero)}</td>
+        </tr>`;
+      }).join("");
+
+      return `<article class="match">
+        <div class="match-head">
+          <div>
+            <h2>${match.teamTag} vs ${match.enemyTeamTag}</h2>
+            <div class="subtitle">Match ${match.matchId} · ${match.teamSide} 观察 ${match.enemySide}</div>
+            <div class="pills">
+              <span class="pill">时间窗 ${fmtTime(match.timeWindow.start)}-${fmtTime(match.timeWindow.end)}</span>
+              <span class="pill">Observer ${match.wardCounts.observer}</span>
+              <span class="pill">Sentry ${match.wardCounts.sentry}</span>
+            <span class="pill">高价值眼 ${valueSummary.high || 0}</span>
+            <span class="pill">低/无收益眼 ${(valueSummary.low || 0) + (valueSummary.none || 0)}</span>
+            </div>
+          </div>
+          <div class="pills">
+            <span class="pill">Hero-seconds ${match.metrics.heroSeconds}</span>
+            <span class="pill">Unique seconds ${match.metrics.uniqueSeconds}</span>
+            <span class="pill">Appearances ${match.metrics.appearances}</span>
+            <span class="pill">Invisible ${match.metrics.invisibleHeroSeconds}</span>
+            <span class="pill">Observer contribution ${match.metrics.observerContributionHeroSeconds || 0}</span>
+          </div>
+        </div>
+        <div class="section-title">敌方英雄被看到明细</div>
+        <table>
+          <thead>
+            <tr>
+              <th>敌方英雄</th>
+              <th>可见秒数</th>
+              <th>出现次数</th>
+              <th>隐身可见秒数</th>
+              <th>可见区间</th>
+              <th>来源眼位</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${renderMapPanel(match)}
+        ${renderWardContributions(match)}
+      </article>`;
+    }
+
+    function renderComparison(comparison) {
+      const [left, right] = comparison.teams || [];
+      if (!left || !right) return "";
+      const delta = comparison.delta || {};
+      const signed = value => value > 0 ? `+${value}` : String(value || 0);
+      return `<section class="panel">
+        <h2>双队对比 · Match ${comparison.matchId}</h2>
+        <div class="subtitle">${left.teamTag} (${left.side}) vs ${right.teamTag} (${right.side})，差值为前者减后者。</div>
+        <div class="cards">
+          ${card(`${left.teamTag} Hero-seconds`, left.metrics.heroSeconds || 0)}
+          ${card(`${right.teamTag} Hero-seconds`, right.metrics.heroSeconds || 0)}
+          ${card("Hero-seconds 差值", signed(delta.heroSeconds))}
+          ${card("出现次数差值", signed(delta.appearances))}
+        </div>
+        <div class="cards">
+          ${card("Unique seconds 差值", signed(delta.uniqueSeconds))}
+          ${card("隐身可见差值", signed(delta.invisibleHeroSeconds))}
+          ${card("Observer 贡献差值", signed(delta.observerContributionHeroSeconds))}
+          ${card("对比场次", comparison.matchId)}
+        </div>
+      </section>`;
+    }
+
+    function renderReport(report) {
+      const totals = report.totals || {};
+      const cache = report.cache || {};
+      const cacheText = cache.hit ? "来自缓存" : "新计算";
+      el.result.innerHTML = `<section class="panel">
+        <div class="result-head">
+          <div>
+            <h2>统计结果</h2>
+            <div class="subtitle">${cacheText}${cache.computedAt ? ` · ${cache.computedAt}` : ""}</div>
+          </div>
+          <div class="toolbar-actions">
+            <button id="exportJson">导出 JSON</button>
+            <button id="exportCsv">导出 CSV</button>
+          </div>
+        </div>
+        <div class="cards">
+          ${card("Hero-seconds", totals.heroSeconds || 0)}
+          ${card("Unique seconds", totals.uniqueSeconds || 0)}
+          ${card("Appearances", totals.appearances || 0)}
+          ${card("Invisible hero-seconds", totals.invisibleHeroSeconds || 0)}
+          ${card("Observer contribution", totals.observerContributionHeroSeconds || 0)}
+        </div>
+      </section>
+      ${(report.comparisons || []).map(renderComparison).join("")}
+      ${(report.matches || []).map(renderMatchResult).join("")}`;
+      document.getElementById("exportJson").addEventListener("click", exportJson);
+      document.getElementById("exportCsv").addEventListener("click", exportCsv);
+      initMaps();
+    }
+
+    function downloadText(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function csvEscape(value) {
+      const text = value == null ? "" : String(value);
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    }
+
+    function exportJson() {
+      if (!state.report) return;
+      const team = el.teamTag.value.trim() || "team";
+      downloadText(
+        `ward_visibility_${team}.json`,
+        JSON.stringify(state.report, null, 2),
+        "application/json;charset=utf-8",
+      );
+    }
+
+    function exportCsv() {
+      if (!state.report) return;
+      const rows = [[
+        "match_id",
+        "team_tag",
+        "enemy_team_tag",
+        "enemy_hero",
+        "persona",
+        "visible_seconds",
+        "appearances",
+        "invisible_visible_seconds",
+        "ward_count",
+      ]];
+      for (const match of state.report.matches || []) {
+        for (const hero of match.enemyHeroes || []) {
+          rows.push([
+            match.matchId,
+            match.teamTag,
+            match.enemyTeamTag,
+            cleanHeroName(hero.heroName),
+            hero.persona || "",
+            hero.visibleSeconds,
+            hero.appearances,
+            hero.invisibleVisibleSeconds,
+            (hero.wardContributors || []).length,
+          ]);
+        }
+      }
+      const csv = rows.map(row => row.map(csvEscape).join(",")).join("\r\n");
+      const team = el.teamTag.value.trim() || "team";
+      downloadText(`ward_visibility_${team}.csv`, csv, "text/csv;charset=utf-8");
+    }
+
+    function loadMapImage() {
+      return new Promise((resolve, reject) => {
+        if (state.mapImage && state.mapImage.complete) {
+          resolve(state.mapImage);
+          return;
+        }
+        const map = state.report && state.report.source ? state.report.source.map : null;
+        if (!map || !map.imageUrl) {
+          reject(new Error("缺少地图配置"));
+          return;
+        }
+        const image = new Image();
+        image.onload = () => {
+          state.mapImage = image;
+          resolve(image);
+        };
+        image.onerror = reject;
+        image.src = map.imageUrl;
+      });
+    }
+
+    function activeAt(items, t) {
+      return (items || []).filter(item => item.start <= t && (item.end == null || t < item.end));
+    }
+
+    function filterLabel(filter) {
+      if (!filter) return "地图筛选：全部";
+      if (filter.type === "hero") return `地图筛选：英雄 slot ${filter.value}`;
+      if (filter.type === "ward") return `地图筛选：眼位 ${filter.value}`;
+      return "地图筛选：全部";
+    }
+
+    function drawMap(match, t) {
+      const canvas = document.querySelector(`[data-map-canvas="${match.matchId}"]`);
+      if (!canvas || !state.mapImage) return;
+      const filter = state.mapFilters.get(match.matchId);
+      const highOnlyInput = document.querySelector(`[data-map-high-only="${match.matchId}"]`);
+      const highOnly = Boolean(highOnlyInput && highOnlyInput.checked);
+      const showVisionInput = document.querySelector(`[data-map-show-vision="${match.matchId}"]`);
+      const showVision = !showVisionInput || showVisionInput.checked;
+      canvas.width = state.mapImage.naturalWidth;
+      canvas.height = state.mapImage.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(state.mapImage, 0, 0, canvas.width, canvas.height);
+
+      let sightings = ((match.map || {}).sightings || []).filter(item => item.time === t);
+      if (filter && filter.type === "hero") {
+        sightings = sightings.filter(item => Number(item.slot) === Number(filter.value));
+      } else if (filter && filter.type === "ward") {
+        sightings = sightings.filter(item => (item.observerEhandles || []).includes(Number(filter.value)));
+      }
+      const relevantWardHandles = new Set();
+      for (const sighting of sightings) {
+        for (const ehandle of sighting.observerEhandles || []) relevantWardHandles.add(ehandle);
+      }
+
+      let wards = activeAt((match.map || {}).wards, t);
+      if (filter && filter.type === "ward") {
+        wards = wards.filter(ward => ward.type === "sen" || ward.ehandle === Number(filter.value));
+      } else if (filter && filter.type === "hero") {
+        wards = wards.filter(ward => ward.type === "sen" || relevantWardHandles.has(ward.ehandle));
+      }
+      if (highOnly) {
+        wards = wards.filter(ward => ward.type === "sen" || ward.valueTier === "high");
+      }
+      const wardByHandle = new Map(wards.map(ward => [ward.ehandle, ward]));
+      if (showVision) {
+        for (const ward of wards) {
+          if (ward.type !== "obs") continue;
+          const cells = visionCellsAt(ward, t);
+          ctx.fillStyle = ward.valueTier === "high"
+            ? "rgba(183,255,208,0.30)"
+            : "rgba(66,210,118,0.22)";
+          for (const cell of cells) {
+            const [px, py] = gridCellPx(cell[0], cell[1]);
+            const r = gridCellRadiusPx(cell[0], cell[1]) * 0.62;
+            ctx.fillRect(px - r, py - r, r * 2, r * 2);
+          }
+        }
+      }
+      for (const ward of wards) {
+        const [x, y] = parserPx(ward.x, ward.y);
+        if (ward.type === "obs" && ward.valueTier === "high") {
+          ctx.beginPath();
+          ctx.arc(x, y, 12, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(183,255,208,0.9)";
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, ward.type === "obs" && ward.valueTier === "high" ? 6 : ward.type === "obs" ? 5 : 7, 0, Math.PI * 2);
+        if (ward.type === "obs") {
+          ctx.fillStyle = ward.valueTier === "high" ? "rgba(183,255,208,0.98)" : "rgba(66,210,118,0.95)";
+          ctx.fill();
+        } else {
+          ctx.strokeStyle = "rgba(80,180,255,0.95)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+
+      for (const sighting of sightings) {
+        const [hx, hy] = parserPx(sighting.x, sighting.y);
+        ctx.strokeStyle = "rgba(255,255,255,0.35)";
+        ctx.lineWidth = 1;
+        for (const ehandle of sighting.observerEhandles || []) {
+          const ward = wardByHandle.get(ehandle);
+          if (!ward) continue;
+          const [wx, wy] = parserPx(ward.x, ward.y);
+          ctx.beginPath();
+          ctx.moveTo(wx, wy);
+          ctx.lineTo(hx, hy);
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(hx, hy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = sighting.invisible ? "rgba(246,195,91,0.98)" : "rgba(238,82,82,0.98)";
+        ctx.fill();
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      const clock = document.querySelector(`[data-map-clock="${match.matchId}"]`);
+      const count = document.querySelector(`[data-map-count="${match.matchId}"]`);
+      const label = document.querySelector(`[data-map-filter-label="${match.matchId}"]`);
+      if (clock) clock.textContent = fmtTime(t);
+      if (count) count.textContent = `${wards.length} 个活跃眼位 · ${sightings.length} 个可见英雄点`;
+      if (label) label.textContent = filterLabel(filter);
+    }
+
+    function visionCellsAt(ward, t) {
+      for (const segment of ward.visionTimeline || []) {
+        if (segment.start <= t && t < segment.end) return segment.cells || [];
+      }
+      return ward.visionCells || [];
+    }
+
+    function firstSightingTime(match, filter) {
+      const sightings = (match.map || {}).sightings || [];
+      const hit = sightings.find(item => {
+        if (!filter) return true;
+        if (filter.type === "hero") return Number(item.slot) === Number(filter.value);
+        if (filter.type === "ward") return (item.observerEhandles || []).includes(Number(filter.value));
+        return true;
+      });
+      return hit ? hit.time : match.timeWindow.start;
+    }
+
+    function setMapFilter(match, filter) {
+      if (filter) state.mapFilters.set(match.matchId, filter);
+      else state.mapFilters.delete(match.matchId);
+      const slider = document.querySelector(`[data-map-slider="${match.matchId}"]`);
+      const targetTime = firstSightingTime(match, filter);
+      if (slider) slider.value = String(targetTime);
+      drawMap(match, targetTime);
+    }
+
+    async function initMaps() {
+      if (!state.report) return;
+      for (const timer of state.mapTimers.values()) clearInterval(timer);
+      state.mapTimers.clear();
+      try {
+        await loadMapImage();
+      } catch (error) {
+        setStatus(`地图图片加载失败：${error.message}`, true);
+        return;
+      }
+      for (const match of state.report.matches || []) {
+        const slider = document.querySelector(`[data-map-slider="${match.matchId}"]`);
+        const play = document.querySelector(`[data-map-play="${match.matchId}"]`);
+        const clear = document.querySelector(`[data-map-clear="${match.matchId}"]`);
+        const highOnly = document.querySelector(`[data-map-high-only="${match.matchId}"]`);
+        const showVision = document.querySelector(`[data-map-show-vision="${match.matchId}"]`);
+        if (!slider || !play) continue;
+        drawMap(match, Number(slider.value));
+        slider.addEventListener("input", () => drawMap(match, Number(slider.value)));
+        if (showVision) {
+          showVision.addEventListener("change", () => drawMap(match, Number(slider.value)));
+        }
+        if (highOnly) {
+          highOnly.addEventListener("change", () => drawMap(match, Number(slider.value)));
+        }
+        if (clear) {
+          clear.addEventListener("click", () => setMapFilter(match, null));
+        }
+        play.addEventListener("click", () => {
+          const existing = state.mapTimers.get(match.matchId);
+          if (existing) {
+            clearInterval(existing);
+            state.mapTimers.delete(match.matchId);
+            play.textContent = "播放";
+            return;
+          }
+          play.textContent = "暂停";
+          const timer = setInterval(() => {
+            let next = Number(slider.value) + 1;
+            if (next > Number(slider.max)) next = Number(slider.min);
+            slider.value = String(next);
+            drawMap(match, next);
+          }, 180);
+          state.mapTimers.set(match.matchId, timer);
+        });
+      }
+      for (const row of document.querySelectorAll("[data-filter-match]")) {
+        row.addEventListener("click", event => {
+          if (event.target.closest("details")) return;
+          const matchId = Number(row.dataset.filterMatch);
+          const match = (state.report.matches || []).find(item => Number(item.matchId) === matchId);
+          if (!match) return;
+          setMapFilter(match, {
+            type: row.dataset.filterType,
+            value: Number(row.dataset.filterValue),
+          });
+          const panel = document.querySelector(`[data-match-id="${matchId}"]`);
+          if (panel) panel.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
+    }
+
+    async function loadMatches() {
+      const teamTag = el.teamTag.value.trim();
+      if (!teamTag) {
+        setStatus("请输入队伍 tag。", true);
+        return;
+      }
+      state.matches = [];
+      state.selected.clear();
+      renderMatches();
+      setStatus("正在查询比赛...");
+      el.loadMatches.disabled = true;
+      try {
+        const params = new URLSearchParams({
+          team_tag: teamTag,
+          limit: String(Number(el.limit.value || 50)),
+        });
+        if (el.opponentTag.value.trim()) params.set("opponent_tag", el.opponentTag.value.trim());
+        if (el.patchVersion.value.trim()) params.set("patch_version", el.patchVersion.value.trim());
+        if (el.league.value.trim()) params.set("league", el.league.value.trim());
+        const payload = await api(`/api/matches?${params.toString()}`);
+        state.matches = payload.matches || [];
+        state.selected.clear();
+        if (state.matches.length === 1) state.selected.add(state.matches[0].matchId);
+        renderMatches();
+        setStatus(state.matches.length ? "比赛查询完成，请选择比赛后计算。" : "没有查到该队伍 tag 的比赛。");
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        el.loadMatches.disabled = false;
+      }
+    }
+
+    async function compute() {
+      const teamTag = el.teamTag.value.trim();
+      const matchIds = [...state.selected];
+      if (!teamTag || !matchIds.length) return;
+      const start = el.startTime.value.trim() === "" ? null : Number(el.startTime.value);
+      const end = el.endTime.value.trim() === "" ? null : Number(el.endTime.value);
+      if (start !== null && end !== null && end < start) {
+        setStatus("结束秒不能小于开始秒。", true);
+        return;
+      }
+      setStatus(`正在计算 ${matchIds.length} 场比赛，可能需要几秒...`);
+      el.compute.disabled = true;
+      try {
+        const report = await api("/api/visibility", {
+          method: "POST",
+          body: JSON.stringify({
+            teamTag,
+            matchIds,
+            start,
+            end,
+            forceRefresh: el.forceRefresh.checked,
+            compareBothSides: el.compareBothSides.checked,
+          }),
+        });
+        state.report = report;
+        renderReport(report);
+        setStatus(report.cache && report.cache.hit ? "已从缓存读取。" : "计算完成，并已写入缓存。");
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        renderMatches();
+      }
+    }
+
+    el.loadMatches.addEventListener("click", loadMatches);
+    el.compute.addEventListener("click", compute);
+    el.teamTag.addEventListener("keydown", event => {
+      if (event.key === "Enter") loadMatches();
+    });
+    for (const button of document.querySelectorAll("[data-time-preset]")) {
+      button.addEventListener("click", () => {
+        const [start, end] = button.dataset.timePreset.split(",");
+        el.startTime.value = start;
+        el.endTime.value = end;
+      });
+    }
+    el.selectAll.addEventListener("click", () => {
+      state.selected = new Set(state.matches.map(match => match.matchId));
+      renderMatches();
+    });
+    el.selectRecent.addEventListener("click", () => {
+      const count = Math.max(1, Number(el.recentCount.value || 1));
+      state.selected = new Set(state.matches.slice(0, count).map(match => match.matchId));
+      renderMatches();
+    });
+    el.clearAll.addEventListener("click", () => {
+      state.selected.clear();
+      renderMatches();
+    });
+  </script>
+</body>
+</html>

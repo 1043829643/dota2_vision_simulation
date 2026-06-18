@@ -191,6 +191,20 @@ class VisibilityGrid:
             return True
         return bool(self.hard_visible[y * self.width + x])
 
+    def tree_alive_at(self, x: int, y: int) -> bool:
+        tile_byte = self.tile_byte_at(x, y)
+        return tile_byte is not None and bool(tile_byte & 0x80)
+
+    def set_tree_alive(self, x: int, y: int, alive: bool) -> bool:
+        """Update the native tree bit and report whether the byte changed."""
+        if not self.in_bounds(x, y):
+            raise ValueError(f"tree cell is outside the visibility grid: {(x, y)}")
+        index = y * self.width + x
+        before = self.tile_bytes[index]
+        after = before | 0x80 if alive else before & ~0x80
+        self.tile_bytes[index] = after
+        return before != after
+
 
 def normalize_angle(angle: float) -> float:
     angle = math.fmod(angle, TAU)

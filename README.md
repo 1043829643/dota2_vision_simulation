@@ -29,6 +29,17 @@ Generate the current timeline:
 powershell -ExecutionPolicy Bypass -File tools\build_8831926213_timeline.ps1
 ```
 
+To include tree events from StarRocks/MySQL, set `DOTA_TREE_EVENTS_SQL` to a
+query with one `%s` placeholder for `match_id`. The query should return event
+time, action/alive state, and either tree/grid/world coordinates. Example:
+
+```powershell
+$env:DOTA_TREE_EVENTS_SQL = "SELECT time, event_type, world_x, world_y FROM dota2_stats.tree_events WHERE match_id=%s ORDER BY time"
+```
+
+The native FoW step applies each death/respawn to tile bit `0x80` before
+recalculating active observer wards for that game second.
+
 The result is written to:
 
 ```text
@@ -58,13 +69,60 @@ $env:DOTA_DB_USER = "user"
 $env:DOTA_DB_PASSWORD = "password"
 ```
 
+## Ward Hero Visibility
+
+To compute how many hero-seconds and continuous appearances a team sees through
+wards, query by team tag and one or more match IDs:
+
+```powershell
+python tools\compute_ward_hero_visibility.py `
+  --match-id 8831926213 `
+  --team-tag KRD `
+  --output outputs\ward_hero_visibility\KRD_8831926213.json
+```
+
+The metric uses `-80` to match duration by default. Enemy heroes must be inside
+allied observer-ward visible cells. Invisible enemy heroes also require allied
+sentry coverage in the same second. The script writes both the JSON result and
+a same-name HTML report unless `--html-output` is provided.
+
+## Query Web App
+
+Run the local query website with the same database environment variables:
+
+```powershell
+$env:DOTA_DB_HOST = "47.86.96.51"
+$env:DOTA_DB_PORT = "9030"
+$env:DOTA_DB_USER = "dota2_reader"
+$env:DOTA_DB_PASSWORD = "password"
+python -m uvicorn web.backend.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000/`, enter a team tag, select one or more matches,
+and run the ward hero visibility calculation. The browser calls the backend API;
+database credentials stay on the server side. Query results are cached under
+`outputs/web_cache/`; use the page's force-refresh option to recompute. The
+result page includes both enemy-hero sighting details and observer ward
+contribution rankings, plus a map timeline that replays active wards and visible
+enemy hero points. The match browser supports opponent, patch, and league
+filters, selecting the latest N matches, and exporting the current report as
+JSON or CSV. Enable the compare-both-sides option to compute both teams in the
+selected matches and show metric deltas. Use the start/end second inputs or
+quick presets to analyze specific game windows such as pre-game, 0-10 minutes,
+or 10-20 minutes. Click an enemy hero row or observer contribution row to filter
+the map timeline to that hero or ward. Observer wards are tagged as high,
+normal, low, or no-value based on hero-seconds, unique heroes seen, and
+efficiency. High-value observers are highlighted on the map and can be isolated
+with the high-value-only map option. The map timeline can draw each active
+observer's current native FoW vision cells in real time.
+
 ## Main Tools
 
 - `tools/compute_ward_occlusion_native.py`: current native FoW observer calculation.
-- `tools/compute_ward_occlusion.js`: legacy shadowcasting implementation retained for comparison.
+- `tools/compute_ward_hero_visibility.py`: ward-based enemy hero sighting metrics.
 - `tools/render_ward_vision.py`: timeline HTML and preview renderer.
 - `tools/build_8831926213_timeline.ps1`: reproducible end-to-end build.
 - `tools/render_occlusion_diagnostic.py`: blocker and ray diagnostics.
 
-The vision engine is based on `devilesk/dota-vision-simulation`, with local
-changes for current map data and external tree collision raycasts.
+The current vision engine uses Valve `cache.fow` angular intervals with the
+native FoW tile-byte grid for height, tree, and explicit-blocker occlusion.

@@ -184,6 +184,13 @@ def active_at(intervals, t):
     return [w for w in intervals if w["start"] <= t and (w["end"] is None or t < w["end"])]
 
 
+def vision_cells_at(ward, t):
+    for segment in ward.get("visionTimeline", []):
+        if segment["start"] <= t < segment["end"]:
+            return segment.get("cells", [])
+    return ward.get("visionCells", [])
+
+
 def ward_count_label(wards):
     obs_r = sum(1 for w in wards if w["type"] == "obs" and w["team"] == "radiant")
     obs_d = sum(1 for w in wards if w["type"] == "obs" and w["team"] == "dire")
@@ -209,9 +216,10 @@ def draw_snapshot(base_path, out_path, intervals, t, title):
             continue
         cx, cy = ward_to_px(ward["x"], ward["y"], width, height)
         style = RADIANT if ward["team"] == "radiant" else DIRE
-        if ward.get("visionCells"):
+        vision_cells = vision_cells_at(ward, t)
+        if vision_cells:
             fill = tuple(style["fill"])
-            for gx, gy in ward["visionCells"]:
+            for gx, gy in vision_cells:
                 px, py = grid_to_px(gx, gy, width, height)
                 r = grid_cell_radius_px(gx, gy, width, height) * 0.62
                 draw.rectangle((px - r, py - r, px + r, py + r), fill=fill)
@@ -365,6 +373,13 @@ def write_html(out_dir, image_name, payload):
     function active(t) {
       return data.wards.filter(w => w.start <= t && (w.end === null || t < w.end));
     }
+    function visionCellsAt(w, t) {
+      if (w.visionTimeline) {
+        const segment = w.visionTimeline.find(s => s.start <= t && t < s.end);
+        if (segment) return segment.cells || [];
+      }
+      return w.visionCells || [];
+    }
     function countLabel(wards) {
       const obsR = wards.filter(w => w.type === "obs" && w.team === "radiant").length;
       const obsD = wards.filter(w => w.type === "obs" && w.team === "dire").length;
@@ -392,9 +407,10 @@ def write_html(out_dir, image_name, payload):
         const [cx, cy] = wardPx(w.x, w.y);
         const radiant = w.team === "radiant";
         const color = radiant ? "66,210,118" : "238,82,82";
-        if (w.visionCells && w.visionCells.length) {
+        const visionCells = visionCellsAt(w, t);
+        if (visionCells.length) {
           ctx.fillStyle = `rgba(${color},0.47)`;
-          for (const cell of w.visionCells) {
+          for (const cell of visionCells) {
             const [pxc, pyc] = gridPx(cell[0], cell[1]);
             const rr = gridCellRadius(cell[0], cell[1]) * 0.62;
             ctx.fillRect(pxc - rr, pyc - rr, rr * 2, rr * 2);
@@ -519,6 +535,7 @@ def main():
             result = cells_by_handle.get(int(ward["ehandle"]))
             if result and result.get("cells"):
                 ward["visionCells"] = result["cells"]
+                ward["visionTimeline"] = result.get("visionTimeline", [])
                 ward["lightArea"] = result.get("lightArea")
                 ward["originGrid"] = result.get("originGrid") or result.get("grid")
                 ward["snappedOrigin"] = bool(result.get("snapped"))

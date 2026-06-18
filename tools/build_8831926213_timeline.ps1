@@ -11,6 +11,7 @@ python (Join-Path $PSScriptRoot "compute_ward_occlusion_native.py") `
   --input (Join-Path $Resources "matches\8831926213\ward_timeline_source.json") `
   --grid (Join-Path $Resources "native-fow\dota_static_fow_grid.json") `
   --cache (Join-Path $Resources "native-fow\cache.fow") `
+  --tree-points (Join-Path $Resources "trees\static_trees_full_from_vents.json") `
   --output $OcclusionPath `
   --radius 1600
 
