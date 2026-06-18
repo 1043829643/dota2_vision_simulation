@@ -1,0 +1,59 @@
+{
+  "name": "dota-vision-simulation",
+  "version": "0.17.0",
+  "description": "http://devilesk.com/dota2/apps/vision-simulation/",
+  "main": "src/vision-simulation.js",
+  "scripts": {
+    "browserify:demo": "browserify src/app.js --standalone VisionSimulation > www/bundle.js",
+    "browserify:prod": "browserify src/vision-simulation.js --standalone DotaVisionSimulation > dist/dota-vision-simulation.js",
+    "uglify:demo": "uglifyjs --compress drop_console,dead_code --mangle -- www/bundle.js > build/bundle.min.js",
+    "uglify:prod": "uglifyjs --compress drop_console,dead_code --mangle -- dist/dota-vision-simulation.js > dist/dota-vision-simulation.min.js",
+    "clean:build": "rm -rf build/*",
+    "build:js": "npm run browserify:demo && npm run uglify:demo",
+    "build:img": "imagemin www/map_data.png --out-dir=build",
+    "build:html": "NODE_ENV=prod node scripts/preprocess.js",
+    "build": "npm run clean:build && npm run build:js && cp www/map_data.png build/ && npm run build:html",
+    "stage:rev": "node scripts/rev.js",
+    "stage": "npm run build && npm run stage:rev",
+    "deploy:copy": "node scripts/deploy.js",
+    "deploy": "npm run stage && npm run git:deploy",
+    "test": "mocha",
+    "git:dist": "git add . && git commit -m \"update dist\"",
+    "git:deploy": "git add -A && git commit -m \"deploy\"",
+    "preversion": "npm run browserify:prod && npm run uglify:prod && npm run git:dist",
+    "postversion": "npm publish"
+  },
+  "author": "devilesk <devilesk@gmail.com> (http://devilesk.com)",
+  "license": "ISC",
+  "devDependencies": {
+    "browserify": "^13.1.1",
+    "del": "^2.2.2",
+    "git-rev-sync": "^1.8.0",
+    "glob": "^7.1.1",
+    "imagemin": "^5.2.2",
+    "imagemin-cli": "^3.0.0",
+    "mocha": "^3.2.0",
+    "png-js": "^0.1.1",
+    "preprocess": "^3.1.0",
+    "replace": "^0.3.0",
+    "uglify-js": "^2.7.5"
+  },
+  "dependencies": {
+    "jimp": "^0.2.27"
+  },
+  "browser": {
+    "./src/imageHandler.js": "./browser/imageHandler.js",
+    "png-js": "./browser/png.js"
+  },
+  "directories": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devilesk/dota-vision-simulation.git"
+  },
+  "bugs": {
+    "url": "https://github.com/devilesk/dota-vision-simulation/issues"
+  },
+  "homepage": "https://github.com/devilesk/dota-vision-simulation#readme"
+}

@@ -1,0 +1,735 @@
+[
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\dire_tree004.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\dire_tree004.vmdl_c.dire_tree004_model",
+        "vertexCount": 568,
+        "min": [
+          -55.3385009765625,
+          -52.75857925415039,
+          -0.3125227689743042
+        ],
+        "max": [
+          59.8582878112793,
+          63.68646240234375,
+          302.8723449707031
+        ],
+        "xyRadiusMaxAxis": 63.68646240234375,
+        "xyRadiusCorner": 87.40125921874977
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\dire_tree004.vmdl_c.tree_dire_04_stump_model",
+        "vertexCount": 284,
+        "min": [
+          -102.47242736816406,
+          -81.61895751953125,
+          -2.672269344329834
+        ],
+        "max": [
+          78.74665832519531,
+          104.27641296386719,
+          84.33301544189453
+        ],
+        "xyRadiusMaxAxis": 104.27641296386719,
+        "xyRadiusCorner": 146.1990720604431
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\dire_tree004.vmdl_c.dire_tree004_inspector",
+        "vertexCount": 569,
+        "min": [
+          -85.25643920898438,
+          -115.36714935302734,
+          -0.3401510715484619
+        ],
+        "max": [
+          100.03157043457031,
+          89.35078430175781,
+          687.4663696289062
+        ],
+        "xyRadiusMaxAxis": 115.36714935302734,
+        "xyRadiusCorner": 152.69542964165666
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\dire_tree004b.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\dire_tree004b.vmdl_c.dire_tree004b_model",
+        "vertexCount": 561,
+        "min": [
+          -48.85694122314453,
+          -87.28548431396484,
+          0.18957412242889404
+        ],
+        "max": [
+          47.71022033691406,
+          51.198448181152344,
+          221.50509643554688
+        ],
+        "xyRadiusMaxAxis": 87.28548431396484,
+        "xyRadiusCorner": 100.02877824708848
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\dire_tree004b.vmdl_c.tree_dire_04b_stump_model",
+        "vertexCount": 316,
+        "min": [
+          -93.16956329345703,
+          -93.55371856689453,
+          -0.7605056762695312
+        ],
+        "max": [
+          60.136356353759766,
+          51.198448181152344,
+          48.38216781616211
+        ],
+        "xyRadiusMaxAxis": 93.55371856689453,
+        "xyRadiusCorner": 132.0335782367016
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\dire_tree004b.vmdl_c.dire_tree004b_inspector",
+        "vertexCount": 529,
+        "min": [
+          -62.619598388671875,
+          -125.91853332519531,
+          0.22092632949352264
+        ],
+        "max": [
+          74.11207580566406,
+          68.74960327148438,
+          333.5756530761719
+        ],
+        "xyRadiusMaxAxis": 125.91853332519531,
+        "xyRadiusCorner": 146.1098108102013
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\dire_tree007.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\dire_tree007.vmdl_c.dire_tree007_model",
+        "vertexCount": 997,
+        "min": [
+          -78.64910125732422,
+          -189.7018585205078,
+          0.41190052032470703
+        ],
+        "max": [
+          181.16616821289062,
+          89.41938781738281,
+          419.37384033203125
+        ],
+        "xyRadiusMaxAxis": 189.7018585205078,
+        "xyRadiusCorner": 262.31274393570004
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\dire_tree007.vmdl_c.tree_dire_07_stump_model",
+        "vertexCount": 326,
+        "min": [
+          -122.07511901855469,
+          -107.36566925048828,
+          -11.193559646606445
+        ],
+        "max": [
+          154.17788696289062,
+          175.4827117919922,
+          110.3745346069336
+        ],
+        "xyRadiusMaxAxis": 175.4827117919922,
+        "xyRadiusCorner": 233.5915301679692
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\dire_tree007.vmdl_c.dire_tree007_inspector",
+        "vertexCount": 1005,
+        "min": [
+          -94.91351318359375,
+          -333.8193664550781,
+          -0.42387086153030396
+        ],
+        "max": [
+          318.799072265625,
+          130.7016143798828,
+          926.3683471679688
+        ],
+        "xyRadiusMaxAxis": 333.8193664550781,
+        "xyRadiusCorner": 461.5931302542239
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\dire_tree008.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\dire_tree008.vmdl_c.dire_tree008_model",
+        "vertexCount": 945,
+        "min": [
+          -61.786563873291016,
+          -197.9987030029297,
+          -2.94189453125
+        ],
+        "max": [
+          208.14048767089844,
+          67.34564971923828,
+          410.72149658203125
+        ],
+        "xyRadiusMaxAxis": 208.14048767089844,
+        "xyRadiusCorner": 287.2733001842005
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\dire_tree008.vmdl_c.tree_dire_08_stump_model",
+        "vertexCount": 322,
+        "min": [
+          -61.786563873291016,
+          -76.30368041992188,
+          -2.94189453125
+        ],
+        "max": [
+          123.80223083496094,
+          67.34564971923828,
+          89.10951232910156
+        ],
+        "xyRadiusMaxAxis": 123.80223083496094,
+        "xyRadiusCorner": 145.4277965360767
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\dire_tree008.vmdl_c.dire_tree008_inspector",
+        "vertexCount": 957,
+        "min": [
+          -130.8029327392578,
+          -397.2321472167969,
+          -0.5782845616340637
+        ],
+        "max": [
+          431.0533752441406,
+          164.47943115234375,
+          1217.3358154296875
+        ],
+        "xyRadiusMaxAxis": 431.0533752441406,
+        "xyRadiusCorner": 586.1743691870473
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_bamboo_01.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_bamboo_01.vmdl_c.tree_bamboo_01_model",
+        "vertexCount": 274,
+        "min": [
+          -71.24919128417969,
+          -86.20735931396484,
+          -1.8599032163619995
+        ],
+        "max": [
+          85.88597106933594,
+          89.41719055175781,
+          268.7672424316406
+        ],
+        "xyRadiusMaxAxis": 89.41719055175781,
+        "xyRadiusCorner": 123.98320044543205
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_bamboo_01.vmdl_c.tree_bamboo_01_stump",
+        "vertexCount": 44,
+        "min": [
+          -27.60802459716797,
+          -60.65724182128906,
+          -1.8599032163619995
+        ],
+        "max": [
+          43.71653366088867,
+          21.816055297851562,
+          35.078285217285156
+        ],
+        "xyRadiusMaxAxis": 60.65724182128906,
+        "xyRadiusCorner": 74.7692202760598
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_bamboo_01.vmdl_c.tree_bamboo_01_inspector",
+        "vertexCount": 472,
+        "min": [
+          -156.22866821289062,
+          -172.8457489013672,
+          -5.4867143630981445
+        ],
+        "max": [
+          148.66336059570312,
+          179.28146362304688,
+          736.5687255859375
+        ],
+        "xyRadiusMaxAxis": 179.28146362304688,
+        "xyRadiusCorner": 237.80084097915918
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_bamboo_02.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_bamboo_02.vmdl_c.tree_bamboo_02_model",
+        "vertexCount": 399,
+        "min": [
+          -81.31392669677734,
+          -84.27078247070312,
+          -1.903228998184204
+        ],
+        "max": [
+          69.11154174804688,
+          74.97380065917969,
+          324.94683837890625
+        ],
+        "xyRadiusMaxAxis": 84.27078247070312,
+        "xyRadiusCorner": 117.10473710774234
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_bamboo_02.vmdl_c.tree_bamboo_02_stumps",
+        "vertexCount": 72,
+        "min": [
+          -27.718786239624023,
+          -32.104469299316406,
+          -2.55718994140625
+        ],
+        "max": [
+          76.49588012695312,
+          61.57024383544922,
+          62.410640716552734
+        ],
+        "xyRadiusMaxAxis": 76.49588012695312,
+        "xyRadiusCorner": 98.19630645983511
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_bamboo_02.vmdl_c.tree_bamboo_02_inspector",
+        "vertexCount": 629,
+        "min": [
+          -177.4322509765625,
+          -169.99537658691406,
+          -5.900010108947754
+        ],
+        "max": [
+          158.7808380126953,
+          141.99655151367188,
+          933.1513671875
+        ],
+        "xyRadiusMaxAxis": 177.4322509765625,
+        "xyRadiusCorner": 245.72470723868324
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_cine_02_low.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_cine_02_low.vmdl_c.tree_cine_02_low",
+        "vertexCount": 1775,
+        "min": [
+          -57.8113899230957,
+          -88.20569610595703,
+          -56.902469635009766
+        ],
+        "max": [
+          103.85753631591797,
+          53.736141204833984,
+          335.34454345703125
+        ],
+        "xyRadiusMaxAxis": 103.85753631591797,
+        "xyRadiusCorner": 136.2594315089736
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_cine_02_low.vmdl_c.tree_cine_02_inspector",
+        "vertexCount": 1772,
+        "min": [
+          -57.8113899230957,
+          -88.20569610595703,
+          -87.07223510742188
+        ],
+        "max": [
+          103.85753631591797,
+          53.736141204833984,
+          513.1446533203125
+        ],
+        "xyRadiusMaxAxis": 103.85753631591797,
+        "xyRadiusCorner": 136.2594315089736
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_cine_02_low_physics.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "physics_group",
+        "vertexCount": 270,
+        "min": [
+          -57.80906295776367,
+          -88.20433044433594,
+          -56.89875793457031
+        ],
+        "max": [
+          103.85752868652344,
+          53.74098205566406,
+          335.330810546875
+        ],
+        "xyRadiusMaxAxis": 103.85752868652344,
+        "xyRadiusCorner": 136.25854165521386
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_oak_01.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_oak_01.vmdl_c.tree_oak_01_model",
+        "vertexCount": 828,
+        "min": [
+          -120.56006622314453,
+          -116.65525817871094,
+          -0.6284085512161255
+        ],
+        "max": [
+          103.00074768066406,
+          99.86030578613281,
+          290.2768249511719
+        ],
+        "xyRadiusMaxAxis": 120.56006622314453,
+        "xyRadiusCorner": 167.75928835230167
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_oak_01.vmdl_c.tree_oak_01_stump_model",
+        "vertexCount": 439,
+        "min": [
+          -2.000800848007202,
+          -76.68232727050781,
+          -114.38967895507812
+        ],
+        "max": [
+          73.59977722167969,
+          62.36231994628906,
+          131.36634826660156
+        ],
+        "xyRadiusMaxAxis": 76.68232727050781,
+        "xyRadiusCorner": 106.28784748362413
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_oak_01.vmdl_c.tree_oak_01_inspector",
+        "vertexCount": 1228,
+        "min": [
+          -291.65350341796875,
+          -285.9497375488281,
+          -0.6876329183578491
+        ],
+        "max": [
+          243.76519775390625,
+          276.37274169921875,
+          695.7197875976562
+        ],
+        "xyRadiusMaxAxis": 291.65350341796875,
+        "xyRadiusCorner": 408.44708159101685
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_oak_01b.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_oak_01b.vmdl_c.tree_oak_01b_model",
+        "vertexCount": 674,
+        "min": [
+          -110.96862030029297,
+          -96.70504760742188,
+          -0.20686912536621094
+        ],
+        "max": [
+          89.13748931884766,
+          98.27113342285156,
+          213.47686767578125
+        ],
+        "xyRadiusMaxAxis": 110.96862030029297,
+        "xyRadiusCorner": 148.22702302739026
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_oak_01b.vmdl_c.tree_oak_01b_stump_model",
+        "vertexCount": 376,
+        "min": [
+          -4.221606731414795,
+          -91.60847473144531,
+          -53.86971664428711
+        ],
+        "max": [
+          30.964235305786133,
+          66.68771362304688,
+          71.18452453613281
+        ],
+        "xyRadiusMaxAxis": 91.60847473144531,
+        "xyRadiusCorner": 96.7000336643889
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_oak_01b.vmdl_c.tree_oak_01b_inspector",
+        "vertexCount": 1221,
+        "min": [
+          -232.24005126953125,
+          -195.34986877441406,
+          -0.35274791717529297
+        ],
+        "max": [
+          176.35174560546875,
+          233.7729034423828,
+          539.0718383789062
+        ],
+        "xyRadiusMaxAxis": 233.7729034423828,
+        "xyRadiusCorner": 329.5227030077839
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_oak_02.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_oak_02.vmdl_c.tree_oak_02_model",
+        "vertexCount": 1080,
+        "min": [
+          -130.51234436035156,
+          -115.47522735595703,
+          -0.3596607744693756
+        ],
+        "max": [
+          142.55152893066406,
+          142.4644775390625,
+          361.6817932128906
+        ],
+        "xyRadiusMaxAxis": 142.55152893066406,
+        "xyRadiusCorner": 201.53676032165447
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_oak_02.vmdl_c.tree_oak_02_stump_model",
+        "vertexCount": 408,
+        "min": [
+          -11.99676513671875,
+          -92.35273742675781,
+          -80.28138732910156
+        ],
+        "max": [
+          43.166786193847656,
+          53.29484939575195,
+          124.23259735107422
+        ],
+        "xyRadiusMaxAxis": 92.35273742675781,
+        "xyRadiusCorner": 101.94311914259359
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_oak_02.vmdl_c.tree_oak_02_inspector",
+        "vertexCount": 1338,
+        "min": [
+          -287.1366882324219,
+          -285.201171875,
+          -0.5888979434967041
+        ],
+        "max": [
+          319.4549255371094,
+          289.8088073730469,
+          853.376953125
+        ],
+        "xyRadiusMaxAxis": 319.4549255371094,
+        "xyRadiusCorner": 431.3242333568888
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_pine_01.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_pine_01.vmdl_c.tree_pine_01_model",
+        "vertexCount": 541,
+        "min": [
+          -89.5837631225586,
+          -75.6738052368164,
+          -0.5769557356834412
+        ],
+        "max": [
+          78.47327423095703,
+          96.86732482910156,
+          321.19757080078125
+        ],
+        "xyRadiusMaxAxis": 96.86732482910156,
+        "xyRadiusCorner": 131.94138560264315
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_pine_01.vmdl_c.tree_pine_01_stump_model",
+        "vertexCount": 265,
+        "min": [
+          -6.413697719573975,
+          -79.32939910888672,
+          -37.91679000854492
+        ],
+        "max": [
+          42.266326904296875,
+          87.21626281738281,
+          71.33478546142578
+        ],
+        "xyRadiusMaxAxis": 87.21626281738281,
+        "xyRadiusCorner": 96.91810403537453
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_pine_01.vmdl_c.tree_pine_01_inspector",
+        "vertexCount": 666,
+        "min": [
+          -191.2578125,
+          -152.75233459472656,
+          0.20800282061100006
+        ],
+        "max": [
+          170.6769561767578,
+          187.22845458984375,
+          804.4949340820312
+        ],
+        "xyRadiusMaxAxis": 191.2578125,
+        "xyRadiusCorner": 267.64537180826864
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_pine_02.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_pine_02.vmdl_c.tree_pine_02_model",
+        "vertexCount": 611,
+        "min": [
+          -113.43064880371094,
+          -126.70659637451172,
+          -0.08968593925237656
+        ],
+        "max": [
+          114.9483413696289,
+          115.9687271118164,
+          421.7145080566406
+        ],
+        "xyRadiusMaxAxis": 126.70659637451172,
+        "xyRadiusCorner": 171.07800194192757
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_pine_02.vmdl_c.tree_pine_02_stump_model",
+        "vertexCount": 250,
+        "min": [
+          -14.319135665893555,
+          -63.002262115478516,
+          -116.20516967773438
+        ],
+        "max": [
+          71.89302825927734,
+          68.9874267578125,
+          58.4272346496582
+        ],
+        "xyRadiusMaxAxis": 71.89302825927734,
+        "xyRadiusCorner": 99.6387101630375
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_pine_02.vmdl_c.tree_pine_02_inspector",
+        "vertexCount": 737,
+        "min": [
+          -173.78448486328125,
+          -193.61874389648438,
+          -0.08931207656860352
+        ],
+        "max": [
+          187.69798278808594,
+          178.0207061767578,
+          1104.364501953125
+        ],
+        "xyRadiusMaxAxis": 193.61874389648438,
+        "xyRadiusCorner": 269.6641443180183
+      }
+    ]
+  },
+  {
+    "file": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\resource_probe\\tree_model_glb_all\\models\\props_tree\\tree_pine_03b.glb",
+    "meshes": [
+      {
+        "meshIndex": 0,
+        "meshName": "models\\props_tree\\tree_pine_03b.vmdl_c.tree_pine_03b_model",
+        "vertexCount": 638,
+        "min": [
+          -84.54986572265625,
+          -62.39536666870117,
+          0.07438348233699799
+        ],
+        "max": [
+          72.96865844726562,
+          73.90133666992188,
+          361.28851318359375
+        ],
+        "xyRadiusMaxAxis": 84.54986572265625,
+        "xyRadiusCorner": 112.29464526557062
+      },
+      {
+        "meshIndex": 1,
+        "meshName": "models\\props_tree\\tree_pine_03b.vmdl_c.tree_pine_03b_stump_model",
+        "vertexCount": 231,
+        "min": [
+          -6.964059829711914,
+          -65.38178253173828,
+          -63.75859451293945
+        ],
+        "max": [
+          45.80169677734375,
+          83.4871597290039,
+          69.0432357788086
+        ],
+        "xyRadiusMaxAxis": 83.4871597290039,
+        "xyRadiusCorner": 95.22552844326964
+      },
+      {
+        "meshIndex": 2,
+        "meshName": "models\\props_tree\\tree_pine_03b.vmdl_c.tree_pine_03b_inspector",
+        "vertexCount": 658,
+        "min": [
+          -118.66405487060547,
+          -80.09803009033203,
+          0.18595871329307556
+        ],
+        "max": [
+          79.6203384399414,
+          78.95693969726562,
+          903.2213134765625
+        ],
+        "xyRadiusMaxAxis": 118.66405487060547,
+        "xyRadiusCorner": 143.16721811464313
+      }
+    ]
+  }
+]

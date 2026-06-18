@@ -1,0 +1,31 @@
+{
+  "image": "dota_psd_8b4a9409.png",
+  "imageWidth": 1024,
+  "imageHeight": 1024,
+  "anchors": [
+    {
+      "id": "radiant_triangle_highground",
+      "label": "天辉三角高台眼位",
+      "pixelX": 301.46,
+      "pixelY": 543.54
+    },
+    {
+      "id": "dire_triangle_highground",
+      "label": "夜魇三角高台眼位",
+      "pixelX": 733.85,
+      "pixelY": 456.75
+    },
+    {
+      "id": "dire_main_jungle_highground",
+      "label": "夜魇主野区高台眼位",
+      "pixelX": 558.76,
+      "pixelY": 316.68
+    },
+    {
+      "id": "radiant_main_jungle_highground",
+      "label": "天辉主野区高台眼位",
+      "pixelX": 449.14,
+      "pixelY": 686.65
+    }
+  ]
+}

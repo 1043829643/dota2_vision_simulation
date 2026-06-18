@@ -1,0 +1,62 @@
+<html>
+	<head>
+        <meta charset="utf-8">
+		<title>Dota 2 Vision Simulation</title>
+        <meta name="description" content="Dota 2 Fog of War Vision Simulation.">
+        <meta name="author" content="devilesk">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	</head>
+    <style>
+#canvas-container {
+    margin-top: 5px;
+    position: relative;
+}
+.layer {
+    position: absolute;
+    top: 0px;
+    left: 0px;
+}
+.info-container {
+    position: fixed;
+    z-index: 999;
+    background-color: white;
+}
+.info-container.top {
+    top: 0;
+}
+.info-container.bottom {
+    bottom: 0;
+}
+    </style>
+	<body>
+<div class="info-container top">
+Move to show FOV. Click trees to toggle on/off. Radius: <input id="radius" type="text" size="6" value="1600" />. Zoom: <select id="zoom" name="zoom"/>
+<option value="1" selected="selected">1x</option>
+<option value="2">2x</option>
+<option value="3">3x</option>
+<option value="4">4x</option>
+<option value="8">8x</option>
+<option value="16">16x</option>
+</select>
+</div>
+<div id="canvas-container">
+    <canvas id="canvas-background" class="layer" style="z-index: 1;"></canvas>
+    <canvas id="canvas-trees" class="layer" style="z-index: 2;"></canvas>
+    <canvas id="canvas-vision" class="layer" style="z-index: 3;"></canvas>
+</div>
+<div class="info-container bottom">
+X: <span id="x-coord"></span>, Y: <span id="y-coord"></span>, WorldX: <span id="worldX-coord"></span>, WorldY: <span id="worldY-coord"></span>, Visibility: <span id="visibility-area"></span>
+<br>FOV: <span id="fov"></span>ms, draw: <span id="draw"></span>ms
+<br>Debug: <input id="debug" type="checkbox" />
+</div>
+<!-- @if NODE_ENV='dev' -->
+<script src="bundle.js"></script>
+<!-- @endif -->
+<!-- @if NODE_ENV='prod' !>
+<script src="bundle.min.js"></script>
+<!-- @endif -->
+<script>
+    VisionSimulation('map_data.png');
+</script>
+</body>
+</html>

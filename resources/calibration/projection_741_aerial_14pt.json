@@ -1,0 +1,23 @@
+{
+  "type": "world_to_pixel_affine",
+  "image": "7.41_map.png",
+  "imageWidth": 851,
+  "imageHeight": 851,
+  "method": "least-squares affine fit from 14 manually paired grid/image points",
+  "affine": {
+    "a": 0.04815171671875,
+    "b": 0.0003374880515625,
+    "c": 419.97619331655005,
+    "d": 0.0001656771859375,
+    "e": -0.04811361765625,
+    "f": 429.56862491864996
+  },
+  "fit": {
+    "pairCount": 14,
+    "meanResidualPx": 3.3522,
+    "maxResidualPx": 6.9647,
+    "rmsResidualPx": 3.7941,
+    "leaveOneOutMeanPx": 4.3655,
+    "leaveOneOutMaxPx": 9.9032
+  }
+}

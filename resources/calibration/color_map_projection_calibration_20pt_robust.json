@@ -1,0 +1,23 @@
+{
+  "type": "world_to_pixel_affine",
+  "image": "dota_psd_8b4a9409.png",
+  "imageWidth": 1024,
+  "imageHeight": 1024,
+  "method": "robust affine fit from 20 manually paired grid/color points",
+  "affine": {
+    "a": 0.04850144375,
+    "b": -0.000829559809375,
+    "c": 509.87728785469994,
+    "d": 0.000398412565625,
+    "e": -0.0484278009375,
+    "f": 500.64815007669995
+  },
+  "fit": {
+    "inlierThresholdPx": 8,
+    "inlierIds": [1, 4, 5, 6, 10, 11, 13, 14, 16, 17, 19, 20],
+    "reviewIds": [2, 3, 7, 8, 9, 12, 15, 18],
+    "inlierMeanResidualPx": 4.4468,
+    "inlierMaxResidualPx": 7.6551,
+    "note": "reviewIds disagree with the dominant mapping by 11-25 px and should be rechecked."
+  }
+}

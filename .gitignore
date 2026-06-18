@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+node_modules/
+
+# Upstream/reference repositories and downloaded archives.
+devilesk-dota-map-coordinates/
+dota-interactive-map-master/
+leamare-dota-interactive-map/
+dota-interactive-map.zip
+dota-vision-simulation-*.tgz
+dota_main.js
+
+# Iterative render/debug artifacts. A curated result is kept in demo/.
+outputs/
+
+# Local editor and OS files.
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

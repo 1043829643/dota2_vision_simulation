@@ -1,0 +1,259 @@
+{
+  "type": "world_to_pixel_affine",
+  "image": "dota_psd_8b4a9409.png",
+  "imageWidth": 1024,
+  "imageHeight": 1024,
+  "source": {
+    "anchors": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\8831926213_ward_vision_current_map\\highground_anchor_pixels.json",
+    "mapData": "C:\\Users\\Admin\\Desktop\\DOTA2视野模拟\\outputs\\vision_raw\\map_data_741.rgba",
+    "worlddata": {
+      "worldMaxY": 10400,
+      "worldMinX": -10464,
+      "worldMinY": -10464,
+      "worldMaxX": 10400
+    },
+    "note": "Pixel anchors were clicked by the user. World anchors were snapped to the nearest valid high-elevation wardable terrain plateau using the old projection only as a search seed."
+  },
+  "affine": {
+    "a": 0.04830476584735727,
+    "b": -0.00020135927441691792,
+    "c": 510.75095202574926,
+    "d": -0.0003468713587133085,
+    "e": -0.046446284007230026,
+    "f": 489.0147512941491
+  },
+  "pairs": [
+    {
+      "id": "radiant_triangle_highground",
+      "label": "天辉三角高台眼位",
+      "pixelX": 301.46,
+      "pixelY": 543.54,
+      "seedWorldX": -4243.2006933731245,
+      "seedWorldY": -765.5187585053955,
+      "seedGrid": {
+        "x": 97,
+        "y": 152,
+        "key": "97,152"
+      },
+      "gridX": 95.5,
+      "gridY": 147.5,
+      "worldX": -4352,
+      "worldY": -1024,
+      "parserX": 94,
+      "parserY": 120,
+      "elevation": 100,
+      "candidates": [
+        {
+          "x": 96,
+          "y": 148,
+          "elevation": 100,
+          "distanceGrid": 4.123105625617661,
+          "worldX": -4320,
+          "worldY": -992
+        },
+        {
+          "x": 95,
+          "y": 148,
+          "elevation": 100,
+          "distanceGrid": 4.47213595499958,
+          "worldX": -4384,
+          "worldY": -992
+        },
+        {
+          "x": 96,
+          "y": 147,
+          "elevation": 100,
+          "distanceGrid": 5.099019513592785,
+          "worldX": -4320,
+          "worldY": -1056
+        },
+        {
+          "x": 95,
+          "y": 147,
+          "elevation": 100,
+          "distanceGrid": 5.385164807134505,
+          "worldX": -4384,
+          "worldY": -1056
+        }
+      ],
+      "fittedPixelX": 300.7348029550534,
+      "fittedPixelY": 538.085330270673,
+      "residualPx": 5.502665954792733
+    },
+    {
+      "id": "dire_triangle_highground",
+      "label": "夜魇三角高台眼位",
+      "pixelX": 733.85,
+      "pixelY": 456.75,
+      "seedWorldX": 4601.056272528303,
+      "seedWorldY": 1007.6676834526043,
+      "seedGrid": {
+        "x": 235,
+        "y": 179,
+        "key": "235,179"
+      },
+      "gridX": 235.5,
+      "gridY": 175.5,
+      "worldX": 4608,
+      "worldY": 768,
+      "parserX": 164,
+      "parserY": 134,
+      "elevation": 100,
+      "candidates": [
+        {
+          "x": 235,
+          "y": 176,
+          "elevation": 100,
+          "distanceGrid": 3,
+          "worldX": 4576,
+          "worldY": 800
+        },
+        {
+          "x": 236,
+          "y": 176,
+          "elevation": 100,
+          "distanceGrid": 3.1622776601683795,
+          "worldX": 4640,
+          "worldY": 800
+        },
+        {
+          "x": 235,
+          "y": 175,
+          "elevation": 100,
+          "distanceGrid": 4,
+          "worldX": 4576,
+          "worldY": 736
+        },
+        {
+          "x": 236,
+          "y": 175,
+          "elevation": 100,
+          "distanceGrid": 4.123105625617661,
+          "worldX": 4640,
+          "worldY": 736
+        }
+      ],
+      "fittedPixelX": 733.1846691276194,
+      "fittedPixelY": 451.7456219556455,
+      "residualPx": 5.048412104866254
+    },
+    {
+      "id": "dire_main_jungle_highground",
+      "label": "夜魇主野区高台眼位",
+      "pixelX": 558.76,
+      "pixelY": 316.68,
+      "seedWorldX": 1019.7039004575308,
+      "seedWorldY": 3869.4054980056308,
+      "seedGrid": {
+        "x": 179,
+        "y": 224,
+        "key": "179,224"
+      },
+      "gridX": 179.5,
+      "gridY": 219.5,
+      "worldX": 1024,
+      "worldY": 3584,
+      "parserX": 136,
+      "parserY": 156,
+      "elevation": 80,
+      "candidates": [
+        {
+          "x": 179,
+          "y": 220,
+          "elevation": 80,
+          "distanceGrid": 4,
+          "worldX": 992,
+          "worldY": 3616
+        },
+        {
+          "x": 180,
+          "y": 220,
+          "elevation": 80,
+          "distanceGrid": 4.123105625617661,
+          "worldX": 1056,
+          "worldY": 3616
+        },
+        {
+          "x": 179,
+          "y": 219,
+          "elevation": 80,
+          "distanceGrid": 5,
+          "worldX": 992,
+          "worldY": 3552
+        },
+        {
+          "x": 180,
+          "y": 219,
+          "elevation": 80,
+          "distanceGrid": 5.099019513592785,
+          "worldX": 1056,
+          "worldY": 3552
+        }
+      ],
+      "fittedPixelX": 559.4933606139329,
+      "fittedPixelY": 322.1960731409143,
+      "residualPx": 5.564609661601057
+    },
+    {
+      "id": "radiant_main_jungle_highground",
+      "label": "天辉主野区高台眼位",
+      "pixelX": 449.14,
+      "pixelY": 686.65,
+      "seedWorldX": -1222.5020908977604,
+      "seedWorldY": -3689.366110834115,
+      "seedGrid": {
+        "x": 144,
+        "y": 106,
+        "key": "144,106"
+      },
+      "gridX": 143.5,
+      "gridY": 95.5,
+      "worldX": -1280,
+      "worldY": -4352,
+      "parserX": 118,
+      "parserY": 94,
+      "elevation": 80,
+      "candidates": [
+        {
+          "x": 144,
+          "y": 96,
+          "elevation": 80,
+          "distanceGrid": 10,
+          "worldX": -1248,
+          "worldY": -4320
+        },
+        {
+          "x": 143,
+          "y": 96,
+          "elevation": 80,
+          "distanceGrid": 10.04987562112089,
+          "worldX": -1312,
+          "worldY": -4320
+        },
+        {
+          "x": 144,
+          "y": 95,
+          "elevation": 80,
+          "distanceGrid": 11,
+          "worldX": -1248,
+          "worldY": -4384
+        },
+        {
+          "x": 143,
+          "y": 95,
+          "elevation": 80,
+          "distanceGrid": 11.045361017187261,
+          "worldX": -1312,
+          "worldY": -4384
+        }
+      ],
+      "fittedPixelX": 449.79716730339436,
+      "fittedPixelY": 691.5929746327672,
+      "residualPx": 4.986468398057987
+    }
+  ],
+  "residual": {
+    "maxPx": 5.564609661601057,
+    "meanPx": 5.275539029829508
+  }
+}
