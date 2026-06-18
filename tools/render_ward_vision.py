@@ -23,6 +23,7 @@ WORLD_PARSER_OFFSET = 16384.0
 VISION_WORLD_MIN_X = -10464.0
 VISION_WORLD_MIN_Y = -10464.0
 VISION_CELL_SIZE = 64.0
+VISION_CELL_CENTER_OFFSET = 0.0
 MAP_WORLD_MIN_X = -10829.42
 MAP_WORLD_MAX_X = 11487.75
 MAP_WORLD_MAX_Y = 11351.48
@@ -115,15 +116,17 @@ def radius_px(x, y, width, height, dota_units):
 
 
 def grid_to_px(gx, gy, width, height):
-    wx = gx * VISION_CELL_SIZE + VISION_WORLD_MIN_X
-    wy = gy * VISION_CELL_SIZE + VISION_WORLD_MIN_Y
+    wx = (gx + VISION_CELL_CENTER_OFFSET) * VISION_CELL_SIZE + VISION_WORLD_MIN_X
+    wy = (gy + VISION_CELL_CENTER_OFFSET) * VISION_CELL_SIZE + VISION_WORLD_MIN_Y
     return world_to_px(wx, wy, width, height)
 
 
 def grid_cell_radius_px(gx, gy, width, height):
     cx, cy = grid_to_px(gx, gy, width, height)
-    x2, y2 = world_to_px(gx * VISION_CELL_SIZE + VISION_WORLD_MIN_X + VISION_CELL_SIZE, gy * VISION_CELL_SIZE + VISION_WORLD_MIN_Y, width, height)
-    x3, y3 = world_to_px(gx * VISION_CELL_SIZE + VISION_WORLD_MIN_X, gy * VISION_CELL_SIZE + VISION_WORLD_MIN_Y + VISION_CELL_SIZE, width, height)
+    wx = (gx + VISION_CELL_CENTER_OFFSET) * VISION_CELL_SIZE + VISION_WORLD_MIN_X
+    wy = (gy + VISION_CELL_CENTER_OFFSET) * VISION_CELL_SIZE + VISION_WORLD_MIN_Y
+    x2, y2 = world_to_px(wx + VISION_CELL_SIZE, wy, width, height)
+    x3, y3 = world_to_px(wx, wy + VISION_CELL_SIZE, width, height)
     return max(1.0, (math.dist((cx, cy), (x2, y2)) + math.dist((cx, cy), (x3, y3))) / 2.0)
 
 
@@ -344,15 +347,19 @@ def write_html(out_dir, image_name, payload):
     }
     function gridPx(gx, gy) {
       const cellSize = data.visionCellSize || 64;
-      const wx = gx * cellSize + data.visionWorldMinX;
-      const wy = gy * cellSize + data.visionWorldMinY;
+      const centerOffset = data.visionCellCenterOffset || 0;
+      const wx = (gx + centerOffset) * cellSize + data.visionWorldMinX;
+      const wy = (gy + centerOffset) * cellSize + data.visionWorldMinY;
       return worldPx(wx, wy);
     }
     function gridCellRadius(gx, gy) {
       const cellSize = data.visionCellSize || 64;
+      const centerOffset = data.visionCellCenterOffset || 0;
       const [cx, cy] = gridPx(gx, gy);
-      const [x2, y2] = worldPx(gx * cellSize + data.visionWorldMinX + cellSize, gy * cellSize + data.visionWorldMinY);
-      const [x3, y3] = worldPx(gx * cellSize + data.visionWorldMinX, gy * cellSize + data.visionWorldMinY + cellSize);
+      const wx = (gx + centerOffset) * cellSize + data.visionWorldMinX;
+      const wy = (gy + centerOffset) * cellSize + data.visionWorldMinY;
+      const [x2, y2] = worldPx(wx + cellSize, wy);
+      const [x3, y3] = worldPx(wx, wy + cellSize);
       return Math.max(1, (Math.hypot(cx - x2, cy - y2) + Math.hypot(cx - x3, cy - y3)) / 2);
     }
     function active(t) {
@@ -497,9 +504,14 @@ def main():
     occlusion = None
     if args.occlusion_cells:
         occlusion = json.loads(Path(args.occlusion_cells).read_text(encoding="utf-8"))
-        global VISION_CELL_SIZE, VISION_WORLD_MIN_X, VISION_WORLD_MIN_Y
+        global VISION_CELL_SIZE, VISION_WORLD_MIN_X, VISION_WORLD_MIN_Y, VISION_CELL_CENTER_OFFSET
         occlusion_grid = (occlusion.get("source") or {}).get("grid") or {}
         VISION_CELL_SIZE = float((occlusion.get("source") or {}).get("cellSize") or VISION_CELL_SIZE)
+        VISION_CELL_CENTER_OFFSET = float(
+            (occlusion.get("source") or {}).get("cellCenterOffset")
+            if (occlusion.get("source") or {}).get("cellCenterOffset") is not None
+            else VISION_CELL_CENTER_OFFSET
+        )
         VISION_WORLD_MIN_X = float(occlusion_grid.get("worldMinX") or VISION_WORLD_MIN_X)
         VISION_WORLD_MIN_Y = float(occlusion_grid.get("worldMinY") or VISION_WORLD_MIN_Y)
         cells_by_handle = {int(r["ehandle"]): r for r in occlusion.get("results", [])}
@@ -524,6 +536,7 @@ def main():
         "visionWorldMinX": VISION_WORLD_MIN_X,
         "visionWorldMinY": VISION_WORLD_MIN_Y,
         "visionCellSize": VISION_CELL_SIZE,
+        "visionCellCenterOffset": VISION_CELL_CENTER_OFFSET,
         "mapWorldMinX": MAP_WORLD_MIN_X,
         "mapWorldMaxX": MAP_WORLD_MAX_X,
         "mapWorldMinY": MAP_WORLD_MIN_Y,
@@ -532,9 +545,9 @@ def main():
         "projectionCalibration": PROJECTION_CALIBRATION,
         "homography": H741,
         "notes": [
-            "Observer wards are drawn from 7.41 shadowcast visibility cells when occlusion data is present.",
+            "Observer wards are drawn from precomputed visibility cells when occlusion data is present.",
             "Sentry wards are drawn as unobstructed true sight rings; only observer wards use occlusion.",
-            "Occluded observer vision uses map_data_741.png elevation, tree, and FOW blocker data.",
+            "The current observer engine uses Valve cache.fow angular intervals and native FoW tile-byte height, tree, and explicit-blocker rules.",
             "When projectionCalibration is present, rendering uses its world_to_pixel_affine matrix; otherwise it uses map bounds plus x=13 y=-16 scale=1.0655.",
         ],
         "wards": intervals,

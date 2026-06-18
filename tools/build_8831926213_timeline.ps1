@@ -2,26 +2,17 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Resources = Join-Path $ProjectRoot "resources"
-$OutputDir = Join-Path $ProjectRoot "outputs\8831926213_full_match_aerial741_tree_invisible"
+$OutputDir = Join-Path $ProjectRoot "outputs\8831926213_ward_vision_native_fow"
 $OcclusionPath = Join-Path $OutputDir "ward_occlusion_cells.json"
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
-node (Join-Path $PSScriptRoot "compute_ward_occlusion.js") `
+python (Join-Path $PSScriptRoot "compute_ward_occlusion_native.py") `
   --input (Join-Path $Resources "matches\8831926213\ward_timeline_source.json") `
-  --map-data (Join-Path $Resources "map-data\map_data_741.rgba") `
+  --grid (Join-Path $Resources "native-fow\dota_static_fow_grid.json") `
+  --cache (Join-Path $Resources "native-fow\cache.fow") `
   --output $OcclusionPath `
-  --cell-size 64 `
-  --blocker-padding-cells 1 `
-  --fow-blocker-lines (Join-Path $Resources "occlusion\fow_blocker_nodes.json") `
-  --max-fow-segment-length 512 `
-  --fow-line-radius-world 256 `
-  --external-trees (Join-Path $Resources "trees\tree_collision_candidates.json") `
-  --external-tree-shape circle `
-  --tree-radius-field stumpRadiusAxis `
-  --tree-radius-add-world 30 `
-  --tree-radius-max-world 128 `
-  --tree-body-visible false
+  --radius 1600
 
 if ($LASTEXITCODE -ne 0) {
   throw "Ward occlusion generation failed with exit code $LASTEXITCODE."
@@ -33,7 +24,8 @@ python (Join-Path $PSScriptRoot "render_ward_vision.py") `
   --out-dir $OutputDir `
   --input-json (Join-Path $Resources "matches\8831926213\ward_timeline_source.json") `
   --occlusion-cells $OcclusionPath `
-  --projection-calibration (Join-Path $Resources "calibration\projection_741_aerial_14pt.json")
+  --projection-calibration (Join-Path $Resources "calibration\projection_741_aerial_14pt.json") `
+  --preview-times 1358,1800
 
 if ($LASTEXITCODE -ne 0) {
   throw "Timeline rendering failed with exit code $LASTEXITCODE."

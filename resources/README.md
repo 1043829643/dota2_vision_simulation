@@ -14,6 +14,9 @@ are stored below this directory. The pipeline no longer requires files from
 - `trees/models/`: the 14 exported GLB tree models used for bounds measurement.
 - `occlusion/fow_blocker_nodes.json`: extracted FOW blocker line segments.
 - `matches/8831926213/ward_timeline_source.json`: ward lifetimes from StarRocks.
+- `native-fow/cache.fow`: Valve's angular occlusion lookup table.
+- `native-fow/dota_static_fow_grid.json`: native 64-unit FoW tile-byte grid.
+- `native-fow/scripts/npc/`: unit day/night vision definitions.
 
 ## Traceability inputs
 

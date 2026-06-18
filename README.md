@@ -5,7 +5,8 @@ Dota 2 7.41 ward-vision simulation for match `8831926213`.
 The project converts parser coordinates to world coordinates, projects them
 onto a calibrated 7.41 map, and renders a per-second ward timeline:
 
-- Observer wards use terrain, tree, and FOW-blocker occlusion.
+- Observer wards use Valve `cache.fow` angular intervals and native FoW
+  tile-byte terrain, tree, and explicit-blocker rules.
 - Sentry wards use an unobstructed 1000-unit true-sight radius.
 - Parser coordinates use `world = parser * 128 - 16384` on both axes.
 - The current map projection is a manually calibrated 14-point affine fit.
@@ -31,7 +32,7 @@ powershell -ExecutionPolicy Bypass -File tools\build_8831926213_timeline.ps1
 The result is written to:
 
 ```text
-outputs/8831926213_full_match_aerial741_tree_invisible/index.html
+outputs/8831926213_ward_vision_native_fow/index.html
 ```
 
 ## Resources
@@ -59,7 +60,8 @@ $env:DOTA_DB_PASSWORD = "password"
 
 ## Main Tools
 
-- `tools/compute_ward_occlusion.js`: observer-ward visibility calculation.
+- `tools/compute_ward_occlusion_native.py`: current native FoW observer calculation.
+- `tools/compute_ward_occlusion.js`: legacy shadowcasting implementation retained for comparison.
 - `tools/render_ward_vision.py`: timeline HTML and preview renderer.
 - `tools/build_8831926213_timeline.ps1`: reproducible end-to-end build.
 - `tools/render_occlusion_diagnostic.py`: blocker and ray diagnostics.
