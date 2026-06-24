@@ -114,7 +114,10 @@ the map timeline to that hero or ward. Observer wards are tagged as high,
 normal, low, or no-value based on hero-seconds, unique heroes seen, and
 efficiency. High-value observers are highlighted on the map and can be isolated
 with the high-value-only map option. The map timeline can draw each active
-observer's current native FoW vision cells in real time.
+observer's current native FoW vision cells in real time. The web app also exposes
+`POST /api/ward-value`, which builds a team-filtered ward spot library and
+leaderboards for the selected matches, then lets the frontend jump from a spot
+instance back into the corresponding match timeline second.
 
 ## Main Tools
 

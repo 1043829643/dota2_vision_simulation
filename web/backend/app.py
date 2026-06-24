@@ -47,6 +47,7 @@ class VisibilityRequest(BaseModel):
 
 
 class WardValueRequest(BaseModel):
+    teamTag: str = Field(min_length=1)
     matchIds: list[int] = Field(min_length=1)
     start: int | None = None
     end: int | None = None
@@ -153,6 +154,7 @@ def ward_value_cache_input(payload: WardValueRequest) -> dict:
     return {
         "version": WARD_VALUE_CACHE_VERSION,
         "database": DEFAULT_DB,
+        "teamTag": payload.teamTag.strip().lower(),
         "matchIds": [int(match_id) for match_id in payload.matchIds],
         "start": payload.start,
         "end": payload.end,
@@ -312,8 +314,21 @@ def ward_value_report(payload: WardValueRequest) -> dict:
         with conn.cursor() as cursor:
             for match_id in payload.matchIds:
                 match = ward_value.compute_match(cursor, int(match_id), args, grid, cache, tree_id_cells)
-                matches.append({key: value for key, value in match.items() if key != "instances"})
-                all_instances.extend(match["instances"])
+                team_side = resolve_team_side(match["matchInfo"], payload.teamTag)
+                filtered_instances = [
+                    item for item in match["instances"]
+                    if item.get("team") == team_side
+                ]
+                match_summary = {key: value for key, value in match.items() if key != "instances"}
+                match_summary["requestedTeamTag"] = payload.teamTag
+                match_summary["requestedTeamSide"] = team_side
+                match_summary["wards"] = {
+                    "total": len(filtered_instances),
+                    "observer": sum(1 for item in filtered_instances if item["wardType"] == "obs"),
+                    "sentry": sum(1 for item in filtered_instances if item["wardType"] == "sen"),
+                }
+                matches.append(match_summary)
+                all_instances.extend(filtered_instances)
 
     invisibility_available = all(match["invisibility"]["available"] for match in matches) if matches else False
     ward_value.score_instances(all_instances, invisibility_available)
@@ -328,6 +343,7 @@ def ward_value_report(payload: WardValueRequest) -> dict:
     return {
         "source": {
             "database": DEFAULT_DB,
+            "teamTag": payload.teamTag,
             "grid": project_path(Path(args.grid)),
             "cache": project_path(Path(args.cache)),
             "treePoints": project_path(Path(args.tree_points)),

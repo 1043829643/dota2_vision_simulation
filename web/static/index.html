@@ -510,6 +510,7 @@
       report: null,
       wardValue: null,
       activeMatchId: null,
+      pendingTimelineTime: null,
       mapImage: null,
       timers: new Map(),
       filters: new Map(),
@@ -917,6 +918,9 @@
       const active = matches.find(match => Number(match.matchId) === Number(state.activeMatchId)) || matches[0];
       const start = active.timeWindow ? active.timeWindow.start : -80;
       const end = active.timeWindow ? active.timeWindow.end : start + 1;
+      const initialTime = state.pendingTimelineTime == null
+        ? start
+        : Math.max(start, Math.min(end, Number(state.pendingTimelineTime)));
       el.timelineContent.className = "";
       el.timelineContent.innerHTML = `
         <div class="toolbar" style="margin-bottom:12px">
@@ -943,7 +947,7 @@
             </div>
             <div class="map-controls">
               <button data-play="${active.matchId}">播放</button>
-              <input data-slider="${active.matchId}" type="range" min="${start}" max="${end}" value="${start}" />
+              <input data-slider="${active.matchId}" type="range" min="${start}" max="${end}" value="${initialTime}" />
               <label class="check"><input data-show-vision="${active.matchId}" type="checkbox" checked /> 假眼 FoW</label>
               <label class="check"><input data-high-only="${active.matchId}" type="checkbox" /> 只看高价值眼</label>
               <button data-clear-filter="${active.matchId}" class="ghost">清除过滤</button>
@@ -1055,6 +1059,7 @@
       el.wardValueContent.className = "";
       el.wardValueContent.innerHTML = `
         <div class="summary-grid">
+          ${card("目标战队", (report.source || {}).teamTag || el.teamTag.value.trim())}
           ${card("比赛数", s.matchCount || 0)}
           ${card("眼位实例", s.instanceCount || 0)}
           ${card("Observer", s.observerCount || 0)}
@@ -1211,11 +1216,40 @@
             <td>${item.valueScore}</td>
             <td>${item.enemyHeroSeenSeconds || 0}</td>
             <td>${item.invisibleHeroTrueSightSeconds || 0}</td>
-            <td>${item.removedReason || ""}</td>
+            <td>${item.removedReason || ""}<br><button class="ghost" data-jump-match="${item.matchId}" data-jump-time="${item.start}" data-jump-ward="${item.ehandle}">跳到时间轴</button></td>
           </tr>`).join("")}</tbody>
         </table></div>
       `;
+      for (const button of detail.querySelectorAll("[data-jump-match]")) {
+        button.addEventListener("click", () => jumpToTimeline({
+          matchId: Number(button.dataset.jumpMatch),
+          time: Number(button.dataset.jumpTime),
+          wardEhandle: Number(button.dataset.jumpWard),
+        }));
+      }
       drawWardSpotMap(spotId);
+    }
+
+    async function jumpToTimeline(target) {
+      if (!state.report || !(state.report.matches || []).some(match => Number(match.matchId) === Number(target.matchId))) {
+        setStatus("请先点击“计算所选比赛”，生成单场时间轴后再跳转。", true);
+        showSection("overview");
+        return;
+      }
+      state.activeMatchId = target.matchId;
+      state.pendingTimelineTime = target.time;
+      if (target.wardEhandle) {
+        state.filters.set(target.matchId, {
+          type: "ward",
+          value: target.wardEhandle,
+        });
+      }
+      stopTimers();
+      renderTimeline();
+      showSection("timeline");
+      await initMaps();
+      state.pendingTimelineTime = null;
+      setStatus(`已跳转到 Match ${target.matchId} 的 ${fmtTime(target.time)}，并过滤到眼位 e${target.wardEhandle}。`);
     }
 
     function stopTimers() {
@@ -1365,6 +1399,7 @@
         const report = await api("/api/ward-value", {
           method: "POST",
           body: JSON.stringify({
+            teamTag: el.teamTag.value.trim(),
             matchIds,
             start: window.start,
             end: window.end,
