@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
 import os
@@ -23,6 +24,31 @@ RESOURCE_ROOT = PROJECT_ROOT / "resources"
 OBSERVER_RADIUS = 1600.0
 SENTRY_RADIUS = 1000.0
 MAP_VERSION = "7.41"
+
+
+def image_data_url(path: Path | None) -> str | None:
+    if path is None or not path.exists():
+        return None
+    suffix = path.suffix.lower()
+    mime = "image/jpeg" if suffix in {".jpg", ".jpeg"} else "image/png"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def load_projection(path: Path | None) -> dict | None:
+    if path is None or not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def world_to_pixel(world_x: float, world_y: float, projection: dict | None) -> dict | None:
+    if not projection:
+        return None
+    affine = projection.get("affine") or {}
+    return {
+        "x": affine["a"] * world_x + affine["b"] * world_y + affine["c"],
+        "y": affine["d"] * world_x + affine["e"] * world_y + affine["f"],
+    }
 
 
 def project_path(path: Path) -> str:
@@ -759,6 +785,7 @@ def confidence_for_count(count: int) -> str:
 
 def finalize_instances(instances: list[dict]) -> list[dict]:
     for item in instances:
+        item["mapVersion"] = MAP_VERSION
         item["confidence"] = confidence_for_count(1)
         for key in ("lastSeenSlots",):
             item.pop(key, None)
@@ -795,11 +822,35 @@ def build_leaderboards(instances: list[dict], spots: list[dict]) -> dict:
     }
 
 
+def build_spot_details(spots: list[dict], instances: list[dict]) -> list[dict]:
+    by_spot: dict[str, list[dict]] = defaultdict(list)
+    for item in instances:
+        by_spot[str(item.get("spotId"))].append(item)
+    details = []
+    for spot in spots:
+        members = sorted(
+            by_spot.get(spot["spotId"], []),
+            key=lambda item: (-float(item.get("valueScore") or 0), item["matchId"], item["start"]),
+        )
+        teams = sorted({str(item.get("team")) for item in members})
+        match_ids = sorted({int(item["matchId"]) for item in members})
+        detail = {
+            **spot,
+            "teams": teams,
+            "matchIds": match_ids,
+            "bestInstance": compact_instance(members[0]) if members else None,
+            "instances": [compact_instance(item) for item in members],
+        }
+        details.append(detail)
+    return details
+
+
 def compact_instance(item: dict) -> dict:
     keys = [
         "matchId",
         "ehandle",
         "spotId",
+        "mapVersion",
         "wardType",
         "team",
         "slot",
@@ -919,8 +970,262 @@ init();
     path.write_text(html, encoding="utf-8")
 
 
+def write_mvp1_html(path: Path, payload: dict, map_data_url: str | None = None) -> None:
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    template = r"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MVP1 Ward Value Report</title>
+  <style>
+    body { margin: 0; font-family: Arial, "Microsoft YaHei", sans-serif; background: #101317; color: #edf3f8; }
+    main { max-width: 1440px; margin: 0 auto; padding: 24px; }
+    h1, h2, h3 { margin: 18px 0 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+    .layout { display: grid; grid-template-columns: minmax(520px, 1.35fr) minmax(360px, 0.85fr); gap: 16px; align-items: start; }
+    .card, .panel { border: 1px solid #2c3744; background: #171d24; border-radius: 8px; padding: 12px; }
+    .value { font-size: 24px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 20px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #29333f; padding: 7px 8px; text-align: left; vertical-align: top; }
+    th { color: #9db0c4; position: sticky; top: 0; background: #151b22; z-index: 1; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover { background: #202a35; }
+    .muted { color: #9aa8b6; }
+    .score { font-weight: 700; color: #94f0b8; }
+    .tabs button { margin-right: 8px; margin-bottom: 8px; min-height: 32px; border: 1px solid #344252; background: #202a35; color: #edf3f8; border-radius: 6px; cursor: pointer; }
+    .tabs button.active { border-color: #79a9ff; color: #d9e8ff; }
+    .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
+    select, input { height: 32px; border: 1px solid #344252; background: #111820; color: #edf3f8; border-radius: 6px; padding: 0 8px; }
+    canvas { width: 100%; height: auto; background: #07090b; border: 1px solid #2a323c; border-radius: 8px; }
+    .table-wrap { max-height: 560px; overflow: auto; border: 1px solid #29333f; border-radius: 8px; }
+    .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px; font-size: 13px; }
+    .mini { font-size: 12px; line-height: 1.45; }
+    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MVP1 Ward Value Report</h1>
+  <p class="muted">样本：8852716636, 8852757973。Observer 使用 native FoW + 动态树；隐身英雄必须被真眼覆盖才计入可见。本页包含眼位库、排行榜、地图点位展示和单点详情。</p>
+  <div id="summary" class="grid"></div>
+  <h2>Filters</h2>
+  <div class="filters">
+    <label>Patch<br><select id="patch"><option value="all">All</option></select></label>
+    <label>Ward Type<br><select id="wardType"><option value="all">All</option><option value="obs">Observer</option><option value="sen">Sentry</option></select></label>
+    <label>Side<br><select id="team"><option value="all">All</option><option value="radiant">Radiant</option><option value="dire">Dire</option></select></label>
+    <label>Match<br><select id="match"><option value="all">All</option></select></label>
+    <label>Min Score<br><input id="minScore" type="number" value="0" min="0" max="100" /></label>
+    <label>Start From<br><input id="startFrom" type="number" value="-999" /></label>
+    <label>Start To<br><input id="startTo" type="number" value="9999" /></label>
+  </div>
+  <div class="layout">
+    <section>
+      <h2>Map Spots</h2>
+      <canvas id="map" width="851" height="851"></canvas>
+      <h2>Leaderboards</h2>
+      <div class="tabs" id="tabs"></div>
+      <div id="table" class="table-wrap"></div>
+    </section>
+    <aside class="panel">
+      <h2>Spot Detail</h2>
+      <div id="detail" class="muted">Click a map point or table row.</div>
+    </aside>
+  </div>
+</main>
+<script>
+const data = __DATA__;
+const mapDataUrl = __MAP_DATA_URL__;
+const boards = {
+  "Best Observer": data.leaderboards.observer.bestOverall,
+  "Most Seen": data.leaderboards.observer.mostSeen,
+  "Best Low Overlap": data.leaderboards.observer.bestLowOverlap,
+  "First Contact": data.leaderboards.observer.bestFirstContact,
+  "Worst Observer": data.leaderboards.observer.worstLowValue,
+  "Fast Dewarded Obs": data.leaderboards.observer.fastDewarded,
+  "Best Sentry": data.leaderboards.sentry.bestAntiInvis,
+  "Observer-Assisted Sentry": data.leaderboards.sentry.bestObserverAssisted,
+  "Best Spots": data.leaderboards.spots.best,
+  "Worst Spots": data.leaderboards.spots.worst,
+};
+let currentBoard = "Best Spots";
+let selectedSpotId = null;
+const spotById = new Map(data.spotDetails.map(s => [s.spotId, s]));
+const instanceBySpot = new Map();
+for (const instance of data.instances) {
+  if (!instanceBySpot.has(instance.spotId)) instanceBySpot.set(instance.spotId, []);
+  instanceBySpot.get(instance.spotId).push(instance);
+}
+function fmt(v) { return v === null || v === undefined ? "" : v; }
+function pct(v) { return v === null || v === undefined ? "" : `${Math.round(v * 100)}%`; }
+function filters() {
+  return {
+    patch: document.getElementById("patch").value,
+    wardType: document.getElementById("wardType").value,
+    team: document.getElementById("team").value,
+    match: document.getElementById("match").value,
+    minScore: Number(document.getElementById("minScore").value || 0),
+    startFrom: Number(document.getElementById("startFrom").value || -9999),
+    startTo: Number(document.getElementById("startTo").value || 99999),
+  };
+}
+function passesInstance(item, f) {
+  if (f.patch !== "all" && item.mapVersion !== f.patch) return false;
+  if (f.wardType !== "all" && item.wardType !== f.wardType) return false;
+  if (f.team !== "all" && item.team !== f.team) return false;
+  if (f.match !== "all" && String(item.matchId) !== f.match) return false;
+  if ((item.valueScore || 0) < f.minScore) return false;
+  if ((item.start ?? 0) < f.startFrom || (item.start ?? 0) > f.startTo) return false;
+  return true;
+}
+function passesSpot(spot, f) {
+  if (f.patch !== "all" && spot.mapVersion !== f.patch) return false;
+  if (f.wardType !== "all" && spot.wardType !== f.wardType) return false;
+  if (f.team !== "all" && spot.team !== f.team) return false;
+  if ((spot.avgScore || 0) < f.minScore) return false;
+  const members = instanceBySpot.get(spot.spotId) || [];
+  return members.some(item => passesInstance(item, f));
+}
+function row(item, isSpot=false) {
+  if (isSpot) return `<tr class="clickable" data-spot="${item.spotId}"><td>${item.spotId}</td><td>${item.wardType}</td><td>${item.team}</td><td>${item.sampleCount}</td><td class="score">${item.avgScore}</td><td>${item.avgSeenSeconds}</td><td>${item.avgLifetimeSeconds}</td><td>${pct(item.dewardRate)}</td><td>${item.confidence}</td></tr>`;
+  const bits = item.scoreBreakdown ? Object.entries(item.scoreBreakdown).map(([k,v]) => `${k}:${v}`).join("<br>") : "";
+  return `<tr class="clickable" data-spot="${item.spotId || ""}"><td>${item.matchId}</td><td>${item.ehandle}</td><td>${item.spotId || ""}</td><td>${item.wardType}</td><td>${item.team}</td><td>${item.start}</td><td>${item.lifetimeSeconds}</td><td class="score">${item.valueScore}</td><td>${item.enemyHeroSeenSeconds || 0}</td><td>${item.uniqueHeroesSeen || 0}</td><td>${item.firstContactCount || 0}</td><td>${item.invisibleHeroTrueSightSeconds || 0}</td><td>${item.removedReason}</td><td>${bits}</td></tr>`;
+}
+function render(name) {
+  currentBoard = name;
+  const f = filters();
+  let items = boards[name] || [];
+  const isSpot = name.includes("Spots");
+  items = items.filter(item => isSpot ? passesSpot(item, f) : passesInstance(item, f));
+  const head = isSpot
+    ? "<tr><th>spot</th><th>type</th><th>team</th><th>sample</th><th>score</th><th>seen</th><th>life</th><th>deward</th><th>confidence</th></tr>"
+    : "<tr><th>match</th><th>ehandle</th><th>spot</th><th>type</th><th>team</th><th>start</th><th>life</th><th>score</th><th>seen</th><th>unique</th><th>first</th><th>trueSight</th><th>removed</th><th>breakdown</th></tr>";
+  document.getElementById("table").innerHTML = `<h3>${name} <span class="muted">(${items.length})</span></h3><table>${head}${items.map(item => row(item, isSpot)).join("")}</table>`;
+  for (const tr of document.querySelectorAll("tr[data-spot]")) tr.onclick = () => selectSpot(tr.dataset.spot);
+  drawMap();
+}
+function selectSpot(spotId) {
+  if (!spotId || !spotById.has(spotId)) return;
+  selectedSpotId = spotId;
+  const spot = spotById.get(spotId);
+  const inst = spot.instances || [];
+  const best = spot.bestInstance || {};
+  document.getElementById("detail").innerHTML = `
+    <h3>${spot.spotId}</h3>
+    <div class="kv">
+      <div class="muted">Type</div><div>${spot.wardType} / ${spot.team}</div>
+      <div class="muted">Sample</div><div>${spot.sampleCount} instances, ${spot.matchCount} matches, ${spot.confidence}</div>
+      <div class="muted">Avg Score</div><div class="score">${spot.avgScore}</div>
+      <div class="muted">Avg Seen</div><div>${spot.avgSeenSeconds}</div>
+      <div class="muted">Avg Lifetime</div><div>${spot.avgLifetimeSeconds}s</div>
+      <div class="muted">Deward Rate</div><div>${pct(spot.dewardRate)}</div>
+      <div class="muted">Center</div><div>${Math.round(spot.centerWorldX)}, ${Math.round(spot.centerWorldY)}</div>
+    </div>
+    <h3>Best Instance</h3>
+    <div class="mini">${best.matchId || ""} e${best.ehandle || ""}, t=${best.start || ""}, score <span class="score">${best.valueScore || ""}</span>, seen=${best.enemyHeroSeenSeconds || 0}, removed=${best.removedReason || ""}</div>
+    <h3>Instances</h3>
+    <table><tr><th>match</th><th>ehandle</th><th>start</th><th>score</th><th>seen</th><th>trueSight</th><th>removed</th></tr>
+    ${inst.map(i => `<tr><td>${i.matchId}</td><td>${i.ehandle}</td><td>${i.start}</td><td class="score">${i.valueScore}</td><td>${i.enemyHeroSeenSeconds || 0}</td><td>${i.invisibleHeroTrueSightSeconds || 0}</td><td>${i.removedReason}</td></tr>`).join("")}</table>
+  `;
+  drawMap();
+}
+function drawPoint(ctx, spot, selected=false) {
+  if (!spot.pixel) return;
+  const x = spot.pixel.x, y = spot.pixel.y;
+  const radius = Math.max(4, Math.min(18, 4 + Math.sqrt(spot.sampleCount) * 2 + (spot.avgScore || 0) / 18));
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = spot.wardType === "obs"
+    ? (spot.team === "radiant" ? "rgba(66,210,118,0.70)" : "rgba(238,82,82,0.70)")
+    : "rgba(80,180,255,0.68)";
+  ctx.fill();
+  ctx.lineWidth = selected ? 4 : 1.5;
+  ctx.strokeStyle = selected ? "rgba(255,255,255,0.96)" : "rgba(10,12,16,0.90)";
+  ctx.stroke();
+}
+function drawMap() {
+  const canvas = document.getElementById("map");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (window.baseMap && window.baseMap.complete) ctx.drawImage(window.baseMap, 0, 0, canvas.width, canvas.height);
+  else { ctx.fillStyle = "#0b1118"; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+  const f = filters();
+  for (const spot of data.spotDetails.filter(s => passesSpot(s, f))) drawPoint(ctx, spot, spot.spotId === selectedSpotId);
+}
+function mapClick(ev) {
+  const rect = ev.currentTarget.getBoundingClientRect();
+  const x = (ev.clientX - rect.left) * ev.currentTarget.width / rect.width;
+  const y = (ev.clientY - rect.top) * ev.currentTarget.height / rect.height;
+  const f = filters();
+  let best = null, bestD = Infinity;
+  for (const spot of data.spotDetails.filter(s => passesSpot(s, f))) {
+    if (!spot.pixel) continue;
+    const d = Math.hypot(spot.pixel.x - x, spot.pixel.y - y);
+    if (d < bestD) { bestD = d; best = spot; }
+  }
+  if (best && bestD < 24) selectSpot(best.spotId);
+}
+function init() {
+  const s = data.summary;
+  document.getElementById("summary").innerHTML = [
+    ["Matches", s.matchCount],
+    ["Patch", data.source.mapVersion],
+    ["Ward Instances", s.instanceCount],
+    ["Observer", s.observerCount],
+    ["Sentry", s.sentryCount],
+    ["Spots", s.spotCount],
+    ["Invisible Data", s.invisibilityDataAvailable ? "available" : "unavailable"],
+  ].map(([k,v]) => `<div class="card"><div class="muted">${k}</div><div class="value">${v}</div></div>`).join("");
+  const patchSelect = document.getElementById("patch");
+  const patches = Array.from(new Set([data.source.mapVersion, ...data.instances.map(item => item.mapVersion), ...data.spotDetails.map(item => item.mapVersion)].filter(Boolean))).sort();
+  for (const patch of patches) {
+    const opt = document.createElement("option");
+    opt.value = String(patch);
+    opt.textContent = String(patch);
+    patchSelect.appendChild(opt);
+  }
+  const matchSelect = document.getElementById("match");
+  for (const mid of s.matches || []) {
+    const opt = document.createElement("option");
+    opt.value = String(mid);
+    opt.textContent = String(mid);
+    matchSelect.appendChild(opt);
+  }
+  const tabs = document.getElementById("tabs");
+  Object.keys(boards).forEach((name, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.onclick = () => {
+      for (const item of tabs.querySelectorAll("button")) item.classList.remove("active");
+      btn.classList.add("active");
+      render(name);
+    };
+    tabs.appendChild(btn);
+    if (i === 0) btn.classList.add("active");
+  });
+  for (const id of ["patch", "wardType", "team", "match", "minScore", "startFrom", "startTo"]) {
+    document.getElementById(id).addEventListener("input", () => render(currentBoard));
+  }
+  document.getElementById("map").addEventListener("click", mapClick);
+  if (mapDataUrl) {
+    window.baseMap = new Image();
+    window.baseMap.onload = drawMap;
+    window.baseMap.src = mapDataUrl;
+  }
+  render(currentBoard);
+  if (data.spotDetails.length) selectSpot(data.spotDetails[0].spotId);
+}
+init();
+</script>
+</body>
+</html>"""
+    html = template.replace("__DATA__", data)
+    html = html.replace("__MAP_DATA_URL__", json.dumps(map_data_url))
+    path.write_text(html, encoding="utf-8")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compute MVP0 ward value metrics.")
+    parser = argparse.ArgumentParser(description="Compute MVP1 ward value metrics and report.")
     parser.add_argument("--match-id", type=int, action="append", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--database", default=os.environ.get("DOTA_DB_DATABASE", "dota2_stats"))
@@ -931,6 +1236,8 @@ def main() -> int:
     parser.add_argument("--grid", default=str(RESOURCE_ROOT / "native-fow" / "dota_static_fow_grid.json"))
     parser.add_argument("--cache", default=str(RESOURCE_ROOT / "native-fow" / "cache.fow"))
     parser.add_argument("--tree-points", default=str(RESOURCE_ROOT / "source" / "dota-map-trees.csv"))
+    parser.add_argument("--map", default=str(RESOURCE_ROOT / "maps" / "7.41_map.png"))
+    parser.add_argument("--projection-calibration", default=str(RESOURCE_ROOT / "calibration" / "projection_741_aerial_14pt.json"))
     parser.add_argument("--start", type=int)
     parser.add_argument("--end", type=int)
     parser.add_argument("--cluster-eps", type=float, default=200.0)
@@ -963,17 +1270,23 @@ def main() -> int:
     score_instances(all_instances, invisibility_available)
     instances = finalize_instances(all_instances)
     spots = cluster_spots(instances, args.cluster_eps)
+    projection = load_projection(Path(args.projection_calibration))
+    for spot in spots:
+        spot["pixel"] = world_to_pixel(spot["centerWorldX"], spot["centerWorldY"], projection)
     leaderboards = build_leaderboards(
         [compact_instance(item) for item in instances],
         spots,
     )
     compact_instances = [compact_instance(item) for item in instances]
+    spot_details = build_spot_details(spots, instances)
     output = {
         "source": {
             "database": args.database,
             "grid": project_path(Path(args.grid)),
             "cache": project_path(Path(args.cache)),
             "treePoints": project_path(Path(args.tree_points)),
+            "map": project_path(Path(args.map)),
+            "projectionCalibration": project_path(Path(args.projection_calibration)),
             "mapVersion": MAP_VERSION,
             "observerRadius": OBSERVER_RADIUS,
             "sentryRadius": SENTRY_RADIUS,
@@ -992,6 +1305,7 @@ def main() -> int:
         "matches": matches,
         "instances": compact_instances,
         "spots": spots,
+        "spotDetails": spot_details,
         "leaderboards": leaderboards,
     }
     (output_dir / "ward_instances.json").write_text(
@@ -1006,11 +1320,15 @@ def main() -> int:
         json.dumps(leaderboards, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    (output_dir / "spot_details.json").write_text(
+        json.dumps(spot_details, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     (output_dir / "summary.json").write_text(
         json.dumps(output, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    write_html(output_dir / "index.html", output)
+    write_mvp1_html(output_dir / "index.html", output, image_data_url(Path(args.map)))
     print(json.dumps(output["summary"], ensure_ascii=False, indent=2))
     print(f"wrote {output_dir / 'index.html'}")
     return 0
