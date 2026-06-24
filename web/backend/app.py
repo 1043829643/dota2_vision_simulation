@@ -340,6 +340,7 @@ def ward_value_report(payload: WardValueRequest) -> dict:
     compact_instances = [ward_value.compact_instance(item) for item in instances]
     leaderboards = ward_value.build_leaderboards(compact_instances, spots)
     spot_details = ward_value.build_spot_details(spots, instances)
+    spot_leaderboards = build_spot_leaderboards(spot_details)
     return {
         "source": {
             "database": DEFAULT_DB,
@@ -368,6 +369,49 @@ def ward_value_report(payload: WardValueRequest) -> dict:
         "spots": spots,
         "spotDetails": spot_details,
         "leaderboards": leaderboards,
+        "spotLeaderboards": spot_leaderboards,
+    }
+
+
+def build_spot_leaderboards(spots: list[dict]) -> dict:
+    def sample_count(spot: dict) -> int:
+        return int(spot.get("sampleCount") or 0)
+
+    def avg_score(spot: dict) -> float:
+        return float(spot.get("avgScore") or 0)
+
+    def deward_rate(spot: dict) -> float:
+        value = spot.get("dewardRate")
+        return -1.0 if value is None else float(value)
+
+    def avg_life(spot: dict) -> float:
+        return float(spot.get("avgLifetimeSeconds") or 0)
+
+    def avg_true_sight(spot: dict) -> float:
+        instances = spot.get("instances") or []
+        if not instances:
+            return 0.0
+        return sum(float(item.get("invisibleHeroTrueSightSeconds") or 0) for item in instances) / len(instances)
+
+    def avg_start(spot: dict) -> float:
+        starts = [float(item.get("start") or 0) for item in spot.get("instances") or []]
+        return sum(starts) / len(starts) if starts else 999999.0
+
+    enough = [spot for spot in spots if sample_count(spot) >= 2]
+    observer = [spot for spot in spots if spot.get("wardType") == "obs"]
+    sentry = [spot for spot in spots if spot.get("wardType") == "sen"]
+    opening = [spot for spot in spots if avg_start(spot) <= 600]
+    return {
+        "mostUsed": sorted(spots, key=lambda spot: (-sample_count(spot), -avg_score(spot), spot.get("spotId", "")))[:20],
+        "stableHighValue": sorted(enough, key=lambda spot: (-avg_score(spot), -sample_count(spot), spot.get("spotId", "")))[:20],
+        "highRisk": sorted(
+            [spot for spot in enough if deward_rate(spot) >= 0],
+            key=lambda spot: (-deward_rate(spot), avg_life(spot), -sample_count(spot)),
+        )[:20],
+        "opening": sorted(opening, key=lambda spot: (avg_start(spot), -sample_count(spot), -avg_score(spot)))[:20],
+        "longLived": sorted(spots, key=lambda spot: (-avg_life(spot), -avg_score(spot), spot.get("spotId", "")))[:20],
+        "observer": sorted(observer, key=lambda spot: (-avg_score(spot), -sample_count(spot), spot.get("spotId", "")))[:20],
+        "sentryTrueSight": sorted(sentry, key=lambda spot: (-avg_true_sight(spot), -avg_score(spot), spot.get("spotId", "")))[:20],
     }
 
 

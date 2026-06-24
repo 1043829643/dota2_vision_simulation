@@ -548,6 +548,9 @@
     }
 
     async function api(path, options = {}) {
+      if (location.protocol === "file:") {
+        throw new Error("当前是 file:// 打开方式，无法调用后端 API。请运行 uvicorn 后访问 http://127.0.0.1:8000/。");
+      }
       const response = await fetch(path, {
         headers: { "Content-Type": "application/json" },
         ...options,
@@ -1056,6 +1059,7 @@
       const worst = ((report.leaderboards || {}).spots || {}).worst || [];
       const observer = ((report.leaderboards || {}).observer || {}).bestOverall || [];
       const sentry = ((report.leaderboards || {}).sentry || {}).bestAntiInvis || [];
+      const spotBoards = report.spotLeaderboards || {};
       el.wardValueContent.className = "";
       el.wardValueContent.innerHTML = `
         <div class="summary-grid">
@@ -1074,7 +1078,17 @@
                 <h2>战队点位地图</h2>
                 <div class="muted">点大小代表样本量，颜色区分假眼/真眼，点击点位查看详情。</div>
               </div>
-              <span class="pill">${s.spotCount || 0} 个点位</span>
+              <div class="actions">
+                <select id="spotBoardFilter" style="width:180px">
+                  <option value="all">全部点位</option>
+                  <option value="mostUsed">最常用</option>
+                  <option value="stableHighValue">稳定高价值</option>
+                  <option value="highRisk">高风险</option>
+                  <option value="opening">开局固定</option>
+                  <option value="sentryTrueSight">真视收益</option>
+                </select>
+                <span class="pill">${s.spotCount || 0} 个点位</span>
+              </div>
             </div>
             <canvas class="map-canvas" id="wardSpotMap" width="851" height="851"></canvas>
             <div class="legend">
@@ -1089,6 +1103,12 @@
           </aside>
         </div>
         <div class="match-layout">
+          ${spotTable("最常用点位", spotBoards.mostUsed || [])}
+          ${spotTable("稳定高价值点位", spotBoards.stableHighValue || [])}
+          ${spotTable("高风险点位", spotBoards.highRisk || [])}
+          ${spotTable("开局固定点位", spotBoards.opening || [])}
+          ${spotTable("长存活点位", spotBoards.longLived || [])}
+          ${spotTable("真视收益点位", spotBoards.sentryTrueSight || [])}
           ${spotTable("最佳点位", best)}
           ${spotTable("最差点位", worst)}
           ${instanceTable("最佳假眼实例", observer)}
@@ -1096,6 +1116,7 @@
         </div>
       `;
       drawWardSpotMap();
+      document.getElementById("spotBoardFilter")?.addEventListener("change", () => drawWardSpotMap());
       for (const row of document.querySelectorAll("[data-spot-id]")) {
         row.addEventListener("click", () => selectWardSpot(row.dataset.spotId));
       }
@@ -1156,7 +1177,12 @@
       ctx.drawImage(state.mapImage, 0, 0, canvas.width, canvas.height);
       const sx = canvas.width / 851;
       const sy = canvas.height / 851;
+      const board = document.getElementById("spotBoardFilter")?.value || "all";
+      const allowed = board === "all"
+        ? null
+        : new Set(((state.wardValue.spotLeaderboards || {})[board] || []).map(spot => spot.spotId));
       for (const spot of state.wardValue.spotDetails || []) {
+        if (allowed && !allowed.has(spot.spotId)) continue;
         if (!spot.pixel) continue;
         const x = spot.pixel.x * sx;
         const y = spot.pixel.y * sy;
@@ -1178,6 +1204,7 @@
         let best = null;
         let bestD = Infinity;
         for (const spot of state.wardValue.spotDetails || []) {
+          if (allowed && !allowed.has(spot.spotId)) continue;
           if (!spot.pixel) continue;
           const px = spot.pixel.x * sx;
           const py = spot.pixel.y * sy;
