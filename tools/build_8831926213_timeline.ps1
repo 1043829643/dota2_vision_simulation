@@ -4,6 +4,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Resources = Join-Path $ProjectRoot "resources"
 $OutputDir = Join-Path $ProjectRoot "outputs\8831926213_ward_vision_native_fow"
 $OcclusionPath = Join-Path $OutputDir "ward_occlusion_cells.json"
+$HeroVisionPath = Join-Path $OutputDir "hero_vision_cells.json"
 $TreeEventsSql = @"
 SELECT time, log_index, state, treeId
 FROM dota2_stats.dota_tree_state_change
@@ -26,12 +27,25 @@ if ($LASTEXITCODE -ne 0) {
   throw "Ward occlusion generation failed with exit code $LASTEXITCODE."
 }
 
+python (Join-Path $PSScriptRoot "compute_hero_vision_native.py") `
+  --match-id 8831926213 `
+  --grid (Join-Path $Resources "native-fow\dota_static_fow_grid.json") `
+  --cache (Join-Path $Resources "native-fow\cache.fow") `
+  --npc-heroes (Join-Path $Resources "native-fow\scripts\npc\npc_heroes.txt") `
+  --occlusion-cells $OcclusionPath `
+  --output $HeroVisionPath
+
+if ($LASTEXITCODE -ne 0) {
+  throw "Hero vision generation failed with exit code $LASTEXITCODE."
+}
+
 python (Join-Path $PSScriptRoot "render_ward_vision.py") `
   --match-id 8831926213 `
   --map (Join-Path $Resources "maps\7.41_map.png") `
   --out-dir $OutputDir `
   --input-json (Join-Path $Resources "matches\8831926213\ward_timeline_source.json") `
   --occlusion-cells $OcclusionPath `
+  --hero-vision $HeroVisionPath `
   --projection-calibration (Join-Path $Resources "calibration\projection_741_aerial_14pt.json") `
   --preview-times 1358,1800
 

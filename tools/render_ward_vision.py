@@ -35,9 +35,13 @@ DEFAULT_CALIBRATION = {
 }
 PROJECTION_CALIBRATION = None
 TREE_POINTS = []
+HERO_VISION = None
+occlusion_payload = None
 
 RADIANT = {"name": "Radiant", "color": [66, 210, 118], "fill": [66, 210, 118, 120]}
 DIRE = {"name": "Dire", "color": [238, 82, 82], "fill": [238, 82, 82, 120]}
+RADIANT_HERO_FILL = (72, 160, 255, 58)
+DIRE_HERO_FILL = (255, 172, 64, 58)
 
 
 def connect():
@@ -191,6 +195,16 @@ def vision_cells_at(ward, t):
     return ward.get("visionCells", [])
 
 
+def hero_vision_at(t):
+    if not HERO_VISION:
+        return None
+    offset = int(t) - int(HERO_VISION.get("start", 0))
+    seconds = HERO_VISION.get("seconds", [])
+    if 0 <= offset < len(seconds) and int(seconds[offset].get("time")) == int(t):
+        return seconds[offset]
+    return next((item for item in seconds if int(item.get("time")) == int(t)), None)
+
+
 def ward_count_label(wards):
     obs_r = sum(1 for w in wards if w["type"] == "obs" and w["team"] == "radiant")
     obs_d = sum(1 for w in wards if w["type"] == "obs" and w["team"] == "dire")
@@ -206,6 +220,26 @@ def draw_snapshot(base_path, out_path, intervals, t, title):
     draw = ImageDraw.Draw(overlay)
 
     active_wards = active_at(intervals, t)
+    hero_second = hero_vision_at(t)
+
+    if hero_second:
+        for fill, runs in (
+            (RADIANT_HERO_FILL, hero_second.get("radiant", [])),
+            (DIRE_HERO_FILL, hero_second.get("dire", [])),
+        ):
+            for gy, x0, x1 in runs:
+                px0, py0 = grid_to_px(x0, gy, width, height)
+                px1, py1 = grid_to_px(x1, gy, width, height)
+                r = grid_cell_radius_px(x0, gy, width, height) * 0.62
+                draw.rectangle(
+                    (
+                        min(px0, px1) - r,
+                        min(py0, py1) - r,
+                        max(px0, px1) + r,
+                        max(py0, py1) + r,
+                    ),
+                    fill=fill,
+                )
 
     for tree in TREE_POINTS:
         tx, ty = world_to_px(float(tree["x"]), float(tree["y"]), width, height)
@@ -242,10 +276,19 @@ def draw_snapshot(base_path, out_path, intervals, t, title):
             draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(80, 180, 255, 200), width=2)
         draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=tuple(style["color"] + [255]), outline=(255, 255, 255, 240))
 
+    tree_events = (((occlusion_payload or {}).get("treeDebug") or {}).get("eventsByTime") or {}).get(str(t), [])
+    for event in tree_events:
+        px, py = grid_to_px(event["cell"][0], event["cell"][1], width, height)
+        color = (48, 235, 105, 245) if event.get("alive") else (255, 90, 70, 245)
+        draw.ellipse((px - 5, py - 5, px + 5, py + 5), outline=color, width=3)
+
     result = Image.alpha_composite(base, overlay)
     draw = ImageDraw.Draw(result)
     font = ImageFont.load_default()
-    label = f"{title}  t={t}s  {ward_count_label(active_wards)}"
+    hero_label = ""
+    if hero_second:
+        hero_label = f" hero={len(hero_second.get('heroes', []))}"
+    label = f"{title}  t={t}s  {ward_count_label(active_wards)}{hero_label}"
     draw.rectangle((8, 8, 8 + len(label) * 7 + 12, 32), fill=(0, 0, 0, 180))
     draw.text((14, 14), label, fill=(255, 255, 255, 255), font=font)
     result.convert("RGB").save(out_path, quality=92)
@@ -263,6 +306,9 @@ def write_html(out_dir, image_name, payload):
     body { margin: 0; background: #101317; color: #eef3f7; }
     main { max-width: 1120px; margin: 0 auto; padding: 20px; }
     .bar { display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center; margin: 12px 0; }
+    .toggles { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 12px; color: #c9d4df; font-size: 13px; }
+    .toggles label { display: inline-flex; align-items: center; gap: 6px; }
+    .meta { margin: 8px 0 12px; color: #98a7b6; font-size: 12px; }
     button { height: 34px; padding: 0 14px; border: 1px solid #3d4652; border-radius: 6px; background: #202833; color: #eef3f7; cursor: pointer; }
     input[type=range] { width: 100%; }
     canvas { width: 100%; height: auto; background: #07090b; border: 1px solid #2a323c; }
@@ -276,8 +322,16 @@ def write_html(out_dir, image_name, payload):
     <div class="legend">
       <span><i class="dot" style="background:#42d276"></i>Radiant observer vision</span>
       <span><i class="dot" style="background:#ee5252"></i>Dire observer vision</span>
+      <span><i class="dot" style="background:#48a0ff"></i>Radiant hero theoretical vision</span>
+      <span><i class="dot" style="background:#ffac40"></i>Dire hero theoretical vision</span>
       <span><i class="dot" style="background:#50b4ff"></i>Sentry true sight range, no occlusion</span>
     </div>
+    <div class="toggles">
+      <label><input id="showWards" type="checkbox" checked /> Wards</label>
+      <label><input id="showHeroes" type="checkbox" /> Hero vision</label>
+      <label><input id="showTrees" type="checkbox" /> Tree events</label>
+    </div>
+    <div id="meta" class="meta"></div>
     <div class="bar">
       <button id="play">Play</button>
       <input id="time" type="range" />
@@ -296,6 +350,10 @@ def write_html(out_dir, image_name, payload):
     const clock = document.getElementById("clock");
     const count = document.getElementById("count");
     const play = document.getElementById("play");
+    const meta = document.getElementById("meta");
+    const showWards = document.getElementById("showWards");
+    const showHeroes = document.getElementById("showHeroes");
+    const showTrees = document.getElementById("showTrees");
     let timer = null;
 
     slider.min = data.start;
@@ -380,6 +438,40 @@ def write_html(out_dir, image_name, payload):
       }
       return w.visionCells || [];
     }
+    function heroVisionAt(t) {
+      if (!data.heroVision || !data.heroVision.seconds) return null;
+      const offset = t - data.heroVision.start;
+      const item = data.heroVision.seconds[offset];
+      if (item && item.time === t) return item;
+      return data.heroVision.seconds.find(s => s.time === t) || null;
+    }
+    function drawRle(runs, color) {
+      ctx.fillStyle = color;
+      for (const run of runs || []) {
+        const gy = run[0], x0 = run[1], x1 = run[2];
+        const [aX, aY] = gridPx(x0, gy);
+        const [bX, bY] = gridPx(x1, gy);
+        const rr = gridCellRadius(x0, gy) * 0.62;
+        ctx.fillRect(
+          Math.min(aX, bX) - rr,
+          Math.min(aY, bY) - rr,
+          Math.abs(bX - aX) + rr * 2,
+          Math.abs(bY - aY) + rr * 2
+        );
+      }
+    }
+    function treeEventsAt(t) {
+      const groups = data.treeDebug && data.treeDebug.eventsByTime;
+      return groups ? (groups[String(t)] || []) : [];
+    }
+    function renderMeta(t, wards, heroSecond) {
+      const dyn = data.occlusionSource && data.occlusionSource.dynamicState;
+      const rejected = data.treeDebug && data.treeDebug.rejectedSummary;
+      const treeNow = treeEventsAt(t).length;
+      const heroCount = heroSecond ? heroSecond.heroes.length : 0;
+      const rejectedText = rejected ? ` rejected ${rejected.total || 0}` : "";
+      meta.textContent = `tree events now ${treeNow}; heroes ${heroCount}; accepted ${dyn ? dyn.treeEventsAccepted : 0};${rejectedText}`;
+    }
     function countLabel(wards) {
       const obsR = wards.filter(w => w.type === "obs" && w.team === "radiant").length;
       const obsD = wards.filter(w => w.type === "obs" && w.team === "dire").length;
@@ -396,13 +488,27 @@ def write_html(out_dir, image_name, payload):
       const t = Number(slider.value);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const heroSecond = heroVisionAt(t);
+      if (showHeroes.checked && heroSecond) {
+        drawRle(heroSecond.radiant, "rgba(72,160,255,0.23)");
+        drawRle(heroSecond.dire, "rgba(255,172,64,0.23)");
+        for (const hero of heroSecond.heroes || []) {
+          const [hx, hy] = worldPx(hero.worldX, hero.worldY);
+          ctx.beginPath();
+          ctx.arc(hx, hy, 3.4, 0, Math.PI * 2);
+          ctx.fillStyle = hero.team === "radiant" ? "rgb(72,160,255)" : "rgb(255,172,64)";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(255,255,255,0.8)";
+          ctx.stroke();
+        }
+      }
       ctx.fillStyle = "rgba(35,235,90,0.86)";
       for (const tree of data.treePoints || []) {
         const [tx, ty] = worldPx(tree.x, tree.y);
         ctx.fillRect(tx - 1.5, ty - 1.5, 3, 3);
       }
       const wards = active(t);
-      for (const w of wards) {
+      if (showWards.checked) for (const w of wards) {
         if (w.type !== "obs") continue;
         const [cx, cy] = wardPx(w.x, w.y);
         const radiant = w.team === "radiant";
@@ -426,7 +532,7 @@ def write_html(out_dir, image_name, payload):
           ctx.stroke();
         }
       }
-      for (const w of wards) {
+      if (showWards.checked) for (const w of wards) {
         if (w.type !== "sen") continue;
         const [cx, cy] = wardPx(w.x, w.y);
         const r = radius(w.x, w.y, 1000);
@@ -438,7 +544,7 @@ def write_html(out_dir, image_name, payload):
         ctx.stroke();
         ctx.setLineDash([]);
       }
-      for (const w of wards) {
+      if (showWards.checked) for (const w of wards) {
         const [cx, cy] = wardPx(w.x, w.y);
         const radiant = w.team === "radiant";
         const color = radiant ? "66,210,118" : "238,82,82";
@@ -449,8 +555,19 @@ def write_html(out_dir, image_name, payload):
         ctx.strokeStyle = "white";
         ctx.stroke();
       }
+      if (showTrees.checked) {
+        for (const event of treeEventsAt(t)) {
+          const [tx, ty] = gridPx(event.cell[0], event.cell[1]);
+          ctx.beginPath();
+          ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = event.alive ? "rgba(48,235,105,0.98)" : "rgba(255,90,70,0.98)";
+          ctx.stroke();
+        }
+      }
       clock.textContent = fmt(t);
       count.textContent = countLabel(wards);
+      renderMeta(t, wards, heroSecond);
     }
     img.onload = () => {
       canvas.width = img.naturalWidth;
@@ -458,6 +575,9 @@ def write_html(out_dir, image_name, payload):
       draw();
     };
     slider.addEventListener("input", draw);
+    showWards.addEventListener("change", draw);
+    showHeroes.addEventListener("change", draw);
+    showTrees.addEventListener("change", draw);
     play.addEventListener("click", () => {
       if (timer) {
         clearInterval(timer);
@@ -492,14 +612,17 @@ def main():
     parser.add_argument("--projection-calibration", help="JSON file containing a world_to_pixel_affine calibration.")
     parser.add_argument("--preview-times", help="Comma-separated seconds to render in addition to standard previews.")
     parser.add_argument("--tree-points", help="JSON containing a trees array with world x/y coordinates.")
+    parser.add_argument("--hero-vision", help="JSON generated by compute_hero_vision_native.py.")
     args = parser.parse_args()
 
-    global PROJECTION_CALIBRATION, TREE_POINTS
+    global PROJECTION_CALIBRATION, TREE_POINTS, HERO_VISION
     if args.projection_calibration:
         PROJECTION_CALIBRATION = json.loads(Path(args.projection_calibration).read_text(encoding="utf-8"))
     if args.tree_points:
         tree_payload = json.loads(Path(args.tree_points).read_text(encoding="utf-8"))
         TREE_POINTS = tree_payload if isinstance(tree_payload, list) else tree_payload.get("trees", [])
+    if args.hero_vision:
+        HERO_VISION = json.loads(Path(args.hero_vision).read_text(encoding="utf-8"))
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -518,8 +641,11 @@ def main():
         rows = query_wards(args.match_id)
         intervals, unmatched = build_intervals(rows)
     occlusion = None
+    global occlusion_payload
+    occlusion_payload = None
     if args.occlusion_cells:
         occlusion = json.loads(Path(args.occlusion_cells).read_text(encoding="utf-8"))
+        occlusion_payload = occlusion
         global VISION_CELL_SIZE, VISION_WORLD_MIN_X, VISION_WORLD_MIN_Y, VISION_CELL_CENTER_OFFSET
         occlusion_grid = (occlusion.get("source") or {}).get("grid") or {}
         VISION_CELL_SIZE = float((occlusion.get("source") or {}).get("cellSize") or VISION_CELL_SIZE)
@@ -542,6 +668,17 @@ def main():
     end_values = [w["end"] for w in intervals if w["end"] is not None]
     start = min(w["start"] for w in intervals)
     end = max(end_values) if end_values else max(w["start"] for w in intervals)
+    tree_debug_events_by_time = {}
+    if occlusion:
+        for event in occlusion.get("treeEvents", []):
+            second = str(int(event["second"]))
+            tree_debug_events_by_time.setdefault(second, []).append(
+                {
+                    "cell": event["cell"],
+                    "alive": event["alive"],
+                    "sourceIndex": event.get("sourceIndex"),
+                }
+            )
     payload = {
         "match_id": args.match_id,
         "map_image": image_name,
@@ -566,8 +703,14 @@ def main():
             "Sentry wards are drawn as unobstructed true sight rings; only observer wards use occlusion.",
             "The current observer engine uses Valve cache.fow angular intervals and native FoW tile-byte height, tree, and explicit-blocker rules.",
             "When projectionCalibration is present, rendering uses its world_to_pixel_affine matrix; otherwise it uses map bounds plus x=13 y=-16 scale=1.0655.",
+            "Optional heroVision is theoretical native FoW from alive hero positions in player_intervals2; it does not include abilities, invisibility, smoke, or shared unit vision.",
         ],
         "wards": intervals,
+        "heroVision": HERO_VISION,
+        "treeDebug": None if not occlusion else {
+            "eventsByTime": tree_debug_events_by_time,
+            "rejectedSummary": ((occlusion.get("source") or {}).get("dynamicState") or {}).get("rejectedTreeEventSummary"),
+        },
         "treePoints": [{"x": float(tree["x"]), "y": float(tree["y"])} for tree in TREE_POINTS],
         "unmatched": unmatched,
         "occlusionSource": None if not occlusion else occlusion.get("source"),

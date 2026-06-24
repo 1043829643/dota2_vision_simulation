@@ -142,6 +142,36 @@ $env:DOTA_TREE_EVENTS_SQL = "SELECT time, event_type, world_x, world_y FROM dota
 
 当前未纳入 temporary revealers 或其他动态 FoW blocker。
 
+## 树事件调试
+
+`ward_occlusion_cells.json` 现在会把未能接入 native 静态树格子的事件按类别汇总到：
+
+```text
+source.dynamicState.rejectedTreeEventSummary
+```
+
+当前主要类别：
+
+- `unmapped_tree_id_above_static_tree_map`：数据库 treeId 超出当前静态树 ID 映射范围，通常是临时树或非 7.41 静态树。
+- `not_native_static_tree_cell`：treeId 可映射到坐标，但对应 native FoW cell 初始没有 `0x80` tree bit。
+
+渲染器会把已接受树事件按秒放入 `treeDebug.eventsByTime`。HTML 页面中打开 `Tree events` 后，当前秒发生的树死亡/复活会以红/绿圆点显示。
+
+## 英雄理论视野层
+
+`tools/compute_hero_vision_native.py` 会从 `player_intervals2` 读取逐秒英雄位置，从 `players` 读取英雄和阵营信息，并用同一套 native FoW 引擎计算每个活着英雄的自然视野。
+
+当前规则：
+
+1. 只取 `life_state='0'` 的英雄位置。
+2. parser 坐标仍使用 `x * 128 - 16384` / `y * 128 - 16384`。
+3. 英雄 day/night vision 从 `resources/native-fow/scripts/npc/npc_heroes.txt` 读取。
+4. 日夜规则暂按 `second % 600 < 300` 为白天，否则夜晚。
+5. 树死亡/复活沿用 `ward_occlusion_cells.json` 中已接受的 tree events。
+6. 输出按队伍合并，并用 `[y, xStart, xEnd]` 行程编码压缩。
+
+当前不包含技能视野、隐身/真假视、smoke、召唤物共享视野、幻象/熊/守卫等非英雄单位视野。
+
 ## 输出格式
 
 `compute_ward_occlusion_native.py` 输出：
@@ -193,3 +223,4 @@ native FoW 批量实现已与参考 `can_unit_see()` 实现做过逐 cell 对比
 - 假眼仍然作为无遮挡 1000 范围渲染。
 - 动态树已接入 tile byte `0x80`，但依赖外部事件数据。
 - temporary revealers 和其他动态 blocker 暂未接入。
+- 英雄视野层是可选理论层，已接入活英雄位置和 native FoW，但未接入技能、召唤物和真实可见性规则。

@@ -17,6 +17,9 @@ are stored below this directory. The pipeline no longer requires files from
 - Dynamic tree deaths/respawns are read at build time from
   `dota2_stats.dota_tree_state_change` using the local `DOTA_DB_*` connection
   environment variables.
+- `dota2_stats.player_intervals2` and `dota2_stats.players`: alive hero
+  positions and hero metadata for the optional per-second theoretical hero
+  vision layer.
 - `native-fow/cache.fow`: Valve's angular occlusion lookup table.
 - `native-fow/dota_static_fow_grid.json`: native 64-unit FoW tile-byte grid.
 - `native-fow/scripts/npc/`: unit day/night vision definitions.
@@ -36,4 +39,10 @@ $env:DOTA_DB_PORT='9030'
 $env:DOTA_DB_USER='...'
 $env:DOTA_DB_PASSWORD='...'
 powershell -ExecutionPolicy Bypass -File tools\build_8831926213_timeline.ps1
+```
+
+The build writes the shareable single-file page to:
+
+```text
+outputs/8831926213_ward_vision_native_fow_share/8831926213_Ward_Vision_Timeline.html
 ```

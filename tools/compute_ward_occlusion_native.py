@@ -162,6 +162,47 @@ def normalize_tree_events(
     return events, rejected
 
 
+def classify_rejected_tree_event(item: dict, max_tree_id: int | None) -> str:
+    reason = str(item.get("reason") or "")
+    row = item.get("row") or {}
+    tree_id = first_value(row, "tree_id", "treeid", "treeId", "id")
+    if "missing tree cell" in reason:
+        if tree_id is not None:
+            try:
+                if max_tree_id is not None and int(tree_id) > max_tree_id:
+                    return "unmapped_tree_id_above_static_tree_map"
+            except (TypeError, ValueError):
+                return "invalid_tree_id"
+        return "unmapped_tree_id_or_missing_coordinates"
+    if "not an initial static tree cell" in reason:
+        return "not_native_static_tree_cell"
+    if "outside grid" in reason:
+        return "outside_native_fow_grid"
+    if "cannot determine tree event action" in reason:
+        return "unknown_tree_event_state"
+    return "other"
+
+
+def summarize_rejected_tree_events(
+    rejected: list[dict], tree_id_cells: dict[int, tuple[int, int]]
+) -> dict:
+    max_tree_id = max(tree_id_cells) if tree_id_cells else None
+    by_category: dict[str, int] = {}
+    samples: dict[str, list[dict]] = {}
+    for item in rejected:
+        category = classify_rejected_tree_event(item, max_tree_id)
+        item["category"] = category
+        by_category[category] = by_category.get(category, 0) + 1
+        samples.setdefault(category, [])
+        if len(samples[category]) < 5:
+            samples[category].append(item)
+    return {
+        "total": len(rejected),
+        "byCategory": by_category,
+        "samples": samples,
+    }
+
+
 def append_vision_segment(segments: list[dict], second: int, cells: list[list[int]], stats: dict):
     if segments and segments[-1]["cells"] == cells:
         segments[-1]["end"] = second + 1
@@ -221,6 +262,9 @@ def main() -> int:
     )
     tree_events, rejected_tree_events = normalize_tree_events(
         event_rows, grid, tree_id_cells
+    )
+    rejected_tree_event_summary = summarize_rejected_tree_events(
+        rejected_tree_events, tree_id_cells
     )
 
     results = []
@@ -359,6 +403,7 @@ def main() -> int:
                 "treeEventRows": len(event_rows),
                 "treeEventsAccepted": len(tree_events),
                 "treeEventsRejected": len(rejected_tree_events),
+                "rejectedTreeEventSummary": rejected_tree_event_summary,
                 "treeEventsAppliedInTimeline": applied_event_count,
                 "treeStateVersions": state_version + 1,
                 "dynamicBlockersApplied": False,
