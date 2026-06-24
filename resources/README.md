@@ -14,6 +14,9 @@ are stored below this directory. The pipeline no longer requires files from
 - `trees/models/`: the 14 exported GLB tree models used for bounds measurement.
 - `occlusion/fow_blocker_nodes.json`: extracted FOW blocker line segments.
 - `matches/8831926213/ward_timeline_source.json`: ward lifetimes from StarRocks.
+- Dynamic tree deaths/respawns are read at build time from
+  `dota2_stats.dota_tree_state_change` using the local `DOTA_DB_*` connection
+  environment variables.
 - `native-fow/cache.fow`: Valve's angular occlusion lookup table.
 - `native-fow/dota_static_fow_grid.json`: native 64-unit FoW tile-byte grid.
 - `native-fow/scripts/npc/`: unit day/night vision definitions.
@@ -28,5 +31,9 @@ are stored below this directory. The pipeline no longer requires files from
 Run the current end-to-end build from any working directory:
 
 ```powershell
+$env:DOTA_DB_HOST='...'
+$env:DOTA_DB_PORT='9030'
+$env:DOTA_DB_USER='...'
+$env:DOTA_DB_PASSWORD='...'
 powershell -ExecutionPolicy Bypass -File tools\build_8831926213_timeline.ps1
 ```

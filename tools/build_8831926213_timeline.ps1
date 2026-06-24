@@ -4,6 +4,12 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Resources = Join-Path $ProjectRoot "resources"
 $OutputDir = Join-Path $ProjectRoot "outputs\8831926213_ward_vision_native_fow"
 $OcclusionPath = Join-Path $OutputDir "ward_occlusion_cells.json"
+$TreeEventsSql = @"
+SELECT time, log_index, state, treeId
+FROM dota2_stats.dota_tree_state_change
+WHERE match_id=%s
+ORDER BY time, log_index
+"@
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
@@ -11,7 +17,8 @@ python (Join-Path $PSScriptRoot "compute_ward_occlusion_native.py") `
   --input (Join-Path $Resources "matches\8831926213\ward_timeline_source.json") `
   --grid (Join-Path $Resources "native-fow\dota_static_fow_grid.json") `
   --cache (Join-Path $Resources "native-fow\cache.fow") `
-  --tree-points (Join-Path $Resources "trees\static_trees_full_from_vents.json") `
+  --tree-points (Join-Path $Resources "source\dota-map-trees.csv") `
+  --tree-events-sql $TreeEventsSql `
   --output $OcclusionPath `
   --radius 1600
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -72,8 +73,12 @@ def first_value(row: dict, *names):
 def load_tree_id_cells(path: Path | None, grid: VisibilityGrid) -> dict[int, tuple[int, int]]:
     if path is None:
         return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    trees = payload if isinstance(payload, list) else payload.get("trees", [])
+    if path.suffix.lower() == ".csv":
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            trees = list(csv.DictReader(handle))
+    else:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        trees = payload if isinstance(payload, list) else payload.get("trees", [])
     result = {}
     for tree in trees:
         tree_id = first_value(tree, "treeId", "tree_id", "id")
@@ -93,7 +98,9 @@ def event_alive(row: dict) -> bool:
         if isinstance(alive, str):
             return alive.strip().lower() in {"1", "true", "alive", "respawn", "spawn"}
         return bool(alive)
-    action = str(first_value(row, "event", "event_type", "action", "type") or "").lower()
+    action = str(
+        first_value(row, "state", "event", "event_type", "action", "type") or ""
+    ).lower()
     if any(token in action for token in ("respawn", "spawn", "alive", "grow")):
         return True
     if any(token in action for token in ("death", "destroy", "cut", "kill", "dead")):
