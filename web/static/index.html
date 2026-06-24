@@ -453,7 +453,7 @@
       <button data-section="matches">比赛样本</button>
       <button data-section="timeline">单场时间轴</button>
       <button data-section="details">明细与导出</button>
-      <button data-section="roadmap">点位库规划</button>
+      <button data-section="roadmap">点位库与排行榜</button>
     </nav>
 
     <section id="overview" class="section active">
@@ -491,12 +491,14 @@
 
     <section id="roadmap" class="section">
       <div class="panel">
-        <h2>点位库规划</h2>
-        <div class="detail-list" style="margin-top:12px">
-          <div><strong>当前已完成：</strong>静态 MVP1 眼位库报告由 <code>tools/compute_ward_value_metrics.py</code> 生成，包含点位地图、排行榜、点位详情和 Patch/Side/Type/Time 筛选。</div>
-          <div><strong>下一步：</strong>把 Ward Spots 和 Leaderboards 接入 Web API，让战队页可以直接展示“最常用点位、最高价值点位、最容易被排点位”。</div>
-          <div><strong>最终目标：</strong>用户从战队页进入点位详情，再跳到具体比赛时间轴验证该点位的每一次使用。</div>
+        <div class="toolbar">
+          <div>
+            <h2>点位库与排行榜</h2>
+            <div class="subtitle">基于当前已选比赛计算眼位实例、点位聚类、最佳/最差点位和点位详情。这个计算会复用 native FoW、动态树和真眼覆盖判断。</div>
+          </div>
+          <button id="computeWardValue">计算点位库</button>
         </div>
+        <div id="wardValueContent" class="empty" style="margin-top:12px">先在“比赛样本”里选择比赛，然后点击“计算点位库”。</div>
       </div>
     </section>
   </main>
@@ -506,6 +508,7 @@
       matches: [],
       selected: new Set(),
       report: null,
+      wardValue: null,
       activeMatchId: null,
       mapImage: null,
       timers: new Map(),
@@ -534,6 +537,8 @@
       overviewContent: document.getElementById("overviewContent"),
       timelineContent: document.getElementById("timelineContent"),
       detailsContent: document.getElementById("detailsContent"),
+      computeWardValue: document.getElementById("computeWardValue"),
+      wardValueContent: document.getElementById("wardValueContent"),
     };
 
     function setStatus(message, isError = false) {
@@ -779,7 +784,8 @@
           resolve(state.mapImage);
           return;
         }
-        const map = state.report && state.report.source ? state.report.source.map : null;
+        const source = state.report?.source || state.wardValue?.source || null;
+        const map = source ? source.map : null;
         if (!map || !map.imageUrl) {
           reject(new Error("缺少地图配置"));
           return;
@@ -1034,6 +1040,184 @@
       document.getElementById("exportCsv").addEventListener("click", exportCsv);
     }
 
+    function renderWardValue() {
+      const report = state.wardValue;
+      if (!report) {
+        el.wardValueContent.className = "empty";
+        el.wardValueContent.innerHTML = "先在“比赛样本”里选择比赛，然后点击“计算点位库”。";
+        return;
+      }
+      const s = report.summary || {};
+      const best = ((report.leaderboards || {}).spots || {}).best || [];
+      const worst = ((report.leaderboards || {}).spots || {}).worst || [];
+      const observer = ((report.leaderboards || {}).observer || {}).bestOverall || [];
+      const sentry = ((report.leaderboards || {}).sentry || {}).bestAntiInvis || [];
+      el.wardValueContent.className = "";
+      el.wardValueContent.innerHTML = `
+        <div class="summary-grid">
+          ${card("比赛数", s.matchCount || 0)}
+          ${card("眼位实例", s.instanceCount || 0)}
+          ${card("Observer", s.observerCount || 0)}
+          ${card("Sentry", s.sentryCount || 0)}
+          ${card("聚类点位", s.spotCount || 0)}
+          ${card("隐身数据", s.invisibilityDataAvailable ? "可用" : "缺失")}
+        </div>
+        <div class="result-layout" style="margin-top:14px">
+          <article class="panel map-card">
+            <div class="map-head">
+              <div>
+                <h2>战队点位地图</h2>
+                <div class="muted">点大小代表样本量，颜色区分假眼/真眼，点击点位查看详情。</div>
+              </div>
+              <span class="pill">${s.spotCount || 0} 个点位</span>
+            </div>
+            <canvas class="map-canvas" id="wardSpotMap" width="851" height="851"></canvas>
+            <div class="legend">
+              <span><span class="dot" style="background:var(--green)"></span>Radiant Observer</span>
+              <span><span class="dot" style="background:var(--red)"></span>Dire Observer</span>
+              <span><span class="dot" style="background:var(--blue)"></span>Sentry</span>
+            </div>
+          </article>
+          <aside class="panel">
+            <h2>点位详情</h2>
+            <div id="spotDetail" class="empty" style="margin-top:10px">点击地图点位或排行榜行。</div>
+          </aside>
+        </div>
+        <div class="match-layout">
+          ${spotTable("最佳点位", best)}
+          ${spotTable("最差点位", worst)}
+          ${instanceTable("最佳假眼实例", observer)}
+          ${instanceTable("最佳真眼实例", sentry)}
+        </div>
+      `;
+      drawWardSpotMap();
+      for (const row of document.querySelectorAll("[data-spot-id]")) {
+        row.addEventListener("click", () => selectWardSpot(row.dataset.spotId));
+      }
+    }
+
+    function spotTable(title, spots) {
+      if (!spots.length) return `<div class="panel"><h2>${title}</h2><div class="empty" style="margin-top:10px">暂无数据。</div></div>`;
+      const rows = spots.slice(0, 20).map(spot => `
+        <tr class="clickable" data-spot-id="${spot.spotId}">
+          <td>${spot.spotId}<br><span class="muted">${spot.wardType} / ${spot.team}</span></td>
+          <td>${spot.sampleCount}</td>
+          <td>${spot.avgScore}</td>
+          <td>${spot.avgSeenSeconds}</td>
+          <td>${spot.dewardRate == null ? "" : Math.round(spot.dewardRate * 100) + "%"}</td>
+        </tr>`).join("");
+      return `<div class="panel">
+        <h2>${title}</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>点位</th><th>样本</th><th>均分</th><th>可见秒</th><th>被排率</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+    }
+
+    function instanceTable(title, instances) {
+      if (!instances.length) return `<div class="panel"><h2>${title}</h2><div class="empty" style="margin-top:10px">暂无数据。</div></div>`;
+      const rows = instances.slice(0, 20).map(item => `
+        <tr class="clickable" data-spot-id="${item.spotId || ""}">
+          <td>${item.matchId}<br><span class="muted">e${item.ehandle} · ${fmtTime(item.start)}</span></td>
+          <td>${item.wardType} / ${item.team}</td>
+          <td>${item.valueScore}</td>
+          <td>${item.enemyHeroSeenSeconds || 0}</td>
+          <td>${item.invisibleHeroTrueSightSeconds || 0}</td>
+        </tr>`).join("");
+      return `<div class="panel">
+        <h2>${title}</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>实例</th><th>类型</th><th>分数</th><th>可见秒</th><th>真视秒</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+    }
+
+    async function drawWardSpotMap(selectedSpotId = null) {
+      if (!state.wardValue) return;
+      try {
+        await loadMapImage();
+      } catch (error) {
+        setStatus(`地图图片加载失败：${error.message}`, true);
+        return;
+      }
+      const canvas = document.getElementById("wardSpotMap");
+      if (!canvas) return;
+      canvas.width = state.mapImage.naturalWidth;
+      canvas.height = state.mapImage.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(state.mapImage, 0, 0, canvas.width, canvas.height);
+      const sx = canvas.width / 851;
+      const sy = canvas.height / 851;
+      for (const spot of state.wardValue.spotDetails || []) {
+        if (!spot.pixel) continue;
+        const x = spot.pixel.x * sx;
+        const y = spot.pixel.y * sy;
+        const r = Math.max(4, Math.min(18, 4 + Math.sqrt(spot.sampleCount || 1) * 2));
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = spot.wardType === "sen"
+          ? "rgba(88,183,255,0.72)"
+          : spot.team === "radiant" ? "rgba(72,208,127,0.72)" : "rgba(240,100,100,0.72)";
+        ctx.fill();
+        ctx.lineWidth = selectedSpotId === spot.spotId ? 4 : 1.5;
+        ctx.strokeStyle = selectedSpotId === spot.spotId ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.85)";
+        ctx.stroke();
+      }
+      canvas.onclick = event => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (event.clientX - rect.left) * canvas.width / rect.width;
+        const y = (event.clientY - rect.top) * canvas.height / rect.height;
+        let best = null;
+        let bestD = Infinity;
+        for (const spot of state.wardValue.spotDetails || []) {
+          if (!spot.pixel) continue;
+          const px = spot.pixel.x * sx;
+          const py = spot.pixel.y * sy;
+          const d = Math.hypot(px - x, py - y);
+          if (d < bestD) {
+            bestD = d;
+            best = spot;
+          }
+        }
+        if (best && bestD < 24) selectWardSpot(best.spotId);
+      };
+    }
+
+    function selectWardSpot(spotId) {
+      if (!state.wardValue || !spotId) return;
+      const spot = (state.wardValue.spotDetails || []).find(item => item.spotId === spotId);
+      if (!spot) return;
+      const detail = document.getElementById("spotDetail");
+      if (!detail) return;
+      const instances = spot.instances || [];
+      detail.className = "";
+      detail.innerHTML = `
+        <h3>${spot.spotId}</h3>
+        <div class="detail-list" style="margin-top:10px">
+          <div><strong>类型：</strong>${spot.wardType} / ${spot.team} / ${spot.mapVersion}</div>
+          <div><strong>样本：</strong>${spot.sampleCount} 个实例，覆盖 ${spot.matchCount} 场，置信度 ${spot.confidence}</div>
+          <div><strong>价值：</strong>平均分 ${spot.avgScore}，平均可见 ${spot.avgSeenSeconds}s，平均存活 ${spot.avgLifetimeSeconds}s</div>
+          <div><strong>风险：</strong>被排率 ${spot.dewardRate == null ? "未知" : Math.round(spot.dewardRate * 100) + "%"}</div>
+          <div><strong>坐标：</strong>${Math.round(spot.centerWorldX)}, ${Math.round(spot.centerWorldY)}</div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>比赛</th><th>时间</th><th>分数</th><th>可见秒</th><th>真视秒</th><th>结果</th></tr></thead>
+          <tbody>${instances.slice(0, 30).map(item => `<tr>
+            <td>${item.matchId}</td>
+            <td>${fmtTime(item.start)}</td>
+            <td>${item.valueScore}</td>
+            <td>${item.enemyHeroSeenSeconds || 0}</td>
+            <td>${item.invisibleHeroTrueSightSeconds || 0}</td>
+            <td>${item.removedReason || ""}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+      `;
+      drawWardSpotMap(spotId);
+    }
+
     function stopTimers() {
       for (const timer of state.timers.values()) clearInterval(timer);
       state.timers.clear();
@@ -1104,9 +1288,11 @@
       state.matches = [];
       state.selected.clear();
       state.report = null;
+      state.wardValue = null;
       state.activeMatchId = null;
       renderMatches();
       renderSearchOverview();
+      renderWardValue();
       setStatus("正在查询比赛...");
       el.loadMatches.disabled = true;
       try {
@@ -1162,6 +1348,38 @@
         setStatus(error.message, true);
       } finally {
         renderMatches();
+      }
+    }
+
+    async function computeWardValue() {
+      const matchIds = [...state.selected];
+      if (!matchIds.length) {
+        setStatus("请先选择比赛样本。", true);
+        showSection("matches");
+        return;
+      }
+      const window = selectedTimeWindow();
+      setStatus(`正在计算 ${matchIds.length} 场比赛的点位库...`);
+      el.computeWardValue.disabled = true;
+      try {
+        const report = await api("/api/ward-value", {
+          method: "POST",
+          body: JSON.stringify({
+            matchIds,
+            start: window.start,
+            end: window.end,
+            forceRefresh: el.forceRefresh.checked,
+            clusterEps: 200,
+          }),
+        });
+        state.wardValue = report;
+        renderWardValue();
+        showSection("roadmap");
+        setStatus(report.cache && report.cache.hit ? "点位库已从缓存读取。" : "点位库计算完成，并已写入缓存。");
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        el.computeWardValue.disabled = false;
       }
     }
 
@@ -1224,6 +1442,7 @@
     }
     el.loadMatches.addEventListener("click", loadMatches);
     el.compute.addEventListener("click", compute);
+    el.computeWardValue.addEventListener("click", computeWardValue);
     el.teamTag.addEventListener("keydown", event => {
       if (event.key === "Enter") loadMatches();
     });
@@ -1231,17 +1450,20 @@
       state.selected = new Set(state.matches.map(match => match.matchId));
       renderMatches();
       renderSearchOverview();
+      renderWardValue();
     });
     el.selectRecent.addEventListener("click", () => {
       const count = Math.max(1, Number(el.recentCount.value || 1));
       state.selected = new Set(state.matches.slice(0, count).map(match => match.matchId));
       renderMatches();
       renderSearchOverview();
+      renderWardValue();
     });
     el.clearAll.addEventListener("click", () => {
       state.selected.clear();
       renderMatches();
       renderSearchOverview();
+      renderWardValue();
     });
     el.timePreset.addEventListener("change", renderSearchOverview);
 

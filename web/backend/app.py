@@ -27,11 +27,13 @@ from compute_ward_hero_visibility import (  # noqa: E402
     project_path,
     resolve_team_side,
 )
+import compute_ward_value_metrics as ward_value  # noqa: E402
 
 
 DEFAULT_DB = os.environ.get("DOTA_DB_DATABASE", "dota2_stats")
 DEFAULT_OVERVIEW_DB = os.environ.get("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
 CACHE_VERSION = "ward-hero-visibility-v8"
+WARD_VALUE_CACHE_VERSION = "ward-value-v1"
 CACHE_ROOT = PROJECT_ROOT / "outputs" / "web_cache"
 
 
@@ -42,6 +44,14 @@ class VisibilityRequest(BaseModel):
     end: int | None = None
     forceRefresh: bool = False
     compareBothSides: bool = False
+
+
+class WardValueRequest(BaseModel):
+    matchIds: list[int] = Field(min_length=1)
+    start: int | None = None
+    end: int | None = None
+    forceRefresh: bool = False
+    clusterEps: float = Field(default=200.0, gt=0)
 
 
 def db_config() -> dict:
@@ -78,6 +88,12 @@ def grid_and_cache() -> tuple[VisibilityGrid, CacheFow]:
     grid_path = RESOURCE_ROOT / "native-fow" / "dota_static_fow_grid.json"
     cache_path = RESOURCE_ROOT / "native-fow" / "cache.fow"
     return VisibilityGrid.load(grid_path), CacheFow.load(cache_path)
+
+
+@lru_cache(maxsize=1)
+def ward_value_tree_cells() -> dict[int, tuple[int, int]]:
+    grid, _ = grid_and_cache()
+    return ward_value.load_tree_id_cells(RESOURCE_ROOT / "source" / "dota-map-trees.csv", grid)
 
 
 def compute_args(start: int | None = None, end: int | None = None) -> SimpleNamespace:
@@ -133,6 +149,35 @@ def cache_path_for(payload: VisibilityRequest) -> Path:
     return CACHE_ROOT / f"{cache_key(payload)}.json"
 
 
+def ward_value_cache_input(payload: WardValueRequest) -> dict:
+    return {
+        "version": WARD_VALUE_CACHE_VERSION,
+        "database": DEFAULT_DB,
+        "matchIds": [int(match_id) for match_id in payload.matchIds],
+        "start": payload.start,
+        "end": payload.end,
+        "clusterEps": payload.clusterEps,
+    }
+
+
+def ward_value_cache_key(payload: WardValueRequest) -> str:
+    raw = json.dumps(ward_value_cache_input(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def ward_value_cache_path_for(payload: WardValueRequest) -> Path:
+    return CACHE_ROOT / f"ward_value_{ward_value_cache_key(payload)}.json"
+
+
+def ward_value_cache_meta(payload: WardValueRequest, hit: bool, path: Path) -> dict:
+    return {
+        "hit": hit,
+        "key": ward_value_cache_key(payload),
+        "path": project_path(path),
+        "version": WARD_VALUE_CACHE_VERSION,
+    }
+
+
 def cache_meta(payload: VisibilityRequest, hit: bool, path: Path) -> dict:
     return {
         "hit": hit,
@@ -154,11 +199,35 @@ def read_cached_report(payload: VisibilityRequest) -> dict | None:
     return report
 
 
+def read_cached_ward_value_report(payload: WardValueRequest) -> dict | None:
+    path = ward_value_cache_path_for(payload)
+    if not path.exists():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["cache"] = {
+        **ward_value_cache_meta(payload, True, path),
+        "computedAt": report.get("cache", {}).get("computedAt"),
+    }
+    return report
+
+
 def write_cached_report(payload: VisibilityRequest, report: dict) -> None:
     path = cache_path_for(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     report["cache"] = {
         **cache_meta(payload, False, path),
+        "computedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    temp_path = path.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def write_cached_ward_value_report(payload: WardValueRequest, report: dict) -> None:
+    path = ward_value_cache_path_for(payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report["cache"] = {
+        **ward_value_cache_meta(payload, False, path),
         "computedAt": datetime.now(timezone.utc).isoformat(),
     }
     temp_path = path.with_suffix(".tmp")
@@ -219,6 +288,73 @@ def visibility_report(payload: VisibilityRequest) -> dict:
     }
 
 
+def ward_value_args(payload: WardValueRequest) -> SimpleNamespace:
+    return SimpleNamespace(
+        database=DEFAULT_DB,
+        grid=str(RESOURCE_ROOT / "native-fow" / "dota_static_fow_grid.json"),
+        cache=str(RESOURCE_ROOT / "native-fow" / "cache.fow"),
+        tree_points=str(RESOURCE_ROOT / "source" / "dota-map-trees.csv"),
+        map=str(RESOURCE_ROOT / "maps" / "7.41_map.png"),
+        projection_calibration=str(RESOURCE_ROOT / "calibration" / "projection_741_aerial_14pt.json"),
+        start=payload.start,
+        end=payload.end,
+        cluster_eps=payload.clusterEps,
+    )
+
+
+def ward_value_report(payload: WardValueRequest) -> dict:
+    grid, cache = grid_and_cache()
+    tree_id_cells = ward_value_tree_cells()
+    args = ward_value_args(payload)
+    matches = []
+    all_instances = []
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            for match_id in payload.matchIds:
+                match = ward_value.compute_match(cursor, int(match_id), args, grid, cache, tree_id_cells)
+                matches.append({key: value for key, value in match.items() if key != "instances"})
+                all_instances.extend(match["instances"])
+
+    invisibility_available = all(match["invisibility"]["available"] for match in matches) if matches else False
+    ward_value.score_instances(all_instances, invisibility_available)
+    instances = ward_value.finalize_instances(all_instances)
+    spots = ward_value.cluster_spots(instances, payload.clusterEps)
+    projection = ward_value.load_projection(Path(args.projection_calibration))
+    for spot in spots:
+        spot["pixel"] = ward_value.world_to_pixel(spot["centerWorldX"], spot["centerWorldY"], projection)
+    compact_instances = [ward_value.compact_instance(item) for item in instances]
+    leaderboards = ward_value.build_leaderboards(compact_instances, spots)
+    spot_details = ward_value.build_spot_details(spots, instances)
+    return {
+        "source": {
+            "database": DEFAULT_DB,
+            "grid": project_path(Path(args.grid)),
+            "cache": project_path(Path(args.cache)),
+            "treePoints": project_path(Path(args.tree_points)),
+            "map": map_config(),
+            "mapVersion": ward_value.MAP_VERSION,
+            "observerRadius": ward_value.OBSERVER_RADIUS,
+            "sentryRadius": ward_value.SENTRY_RADIUS,
+            "clusterEpsWorld": payload.clusterEps,
+            "invisibilityRule": "invisibility_modifier=true requires allied sentry coverage before observer sight counts",
+        },
+        "summary": {
+            "matchCount": len(matches),
+            "matches": [int(match_id) for match_id in payload.matchIds],
+            "instanceCount": len(instances),
+            "observerCount": sum(1 for item in instances if item["wardType"] == "obs"),
+            "sentryCount": sum(1 for item in instances if item["wardType"] == "sen"),
+            "spotCount": len(spots),
+            "invisibilityDataAvailable": invisibility_available,
+        },
+        "matches": matches,
+        "instances": compact_instances,
+        "spots": spots,
+        "spotDetails": spot_details,
+        "leaderboards": leaderboards,
+    }
+
+
 def build_comparisons(matches: list[dict]) -> list[dict]:
     by_match: dict[int, list[dict]] = {}
     for match in matches:
@@ -264,6 +400,16 @@ def cached_visibility_report(payload: VisibilityRequest) -> dict:
             return cached
     report = visibility_report(payload)
     write_cached_report(payload, report)
+    return report
+
+
+def cached_ward_value_report(payload: WardValueRequest) -> dict:
+    if not payload.forceRefresh:
+        cached = read_cached_ward_value_report(payload)
+        if cached is not None:
+            return cached
+    report = ward_value_report(payload)
+    write_cached_ward_value_report(payload, report)
     return report
 
 
@@ -347,6 +493,16 @@ LIMIT %s
 def compute_visibility(request: VisibilityRequest) -> dict:
     try:
         return cached_visibility_report(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except pymysql.MySQLError as exc:
+        raise HTTPException(status_code=500, detail=f"database query failed: {exc}") from exc
+
+
+@app.post("/api/ward-value")
+def compute_ward_value(request: WardValueRequest) -> dict:
+    try:
+        return cached_ward_value_report(request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except pymysql.MySQLError as exc:
