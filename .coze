@@ -3,8 +3,8 @@ requires = ["python-3.12"]
 
 [dev]
 build = ["python", "-m", "pip", "install", "-r", "requirements.txt"]
-run = ["sh", "-c", "cd ${COZE_WORKSPACE_PATH} && python -m uvicorn web.backend.app:app --host 0.0.0.0 --port ${DEPLOY_RUN_PORT}"]
+run = ["sh", "-c", "export DOTA_DB_HOST=47.86.96.51 && export DOTA_DB_PORT=9030 && export DOTA_DB_USER=dota2_reader && export DOTA_DB_PASSWORD='readerDota.' && cd ${COZE_WORKSPACE_PATH} && python -m uvicorn web.backend.app:app --host 0.0.0.0 --port ${DEPLOY_RUN_PORT}"]
 
 [deploy]
 build = ["python", "-m", "pip", "install", "-r", "requirements.txt"]
-run = ["sh", "-c", "cd ${COZE_WORKSPACE_PATH} && python -m uvicorn web.backend.app:app --host 0.0.0.0 --port ${DEPLOY_RUN_PORT}"]
+run = ["sh", "-c", "export DOTA_DB_HOST=47.86.96.51 && export DOTA_DB_PORT=9030 && export DOTA_DB_USER=dota2_reader && export DOTA_DB_PASSWORD='readerDota.' && cd ${COZE_WORKSPACE_PATH} && python -m uvicorn web.backend.app:app --host 0.0.0.0 --port ${DEPLOY_RUN_PORT}"]
