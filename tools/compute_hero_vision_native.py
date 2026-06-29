@@ -233,7 +233,7 @@ def main() -> int:
     parser.add_argument("--cache", default=str(RESOURCE_ROOT / "native-fow" / "cache.fow"))
     parser.add_argument("--npc-heroes", default=str(RESOURCE_ROOT / "native-fow" / "scripts" / "npc" / "npc_heroes.txt"))
     parser.add_argument("--occlusion-cells", help="ward_occlusion_cells.json containing accepted tree events.")
-    parser.add_argument("--database", default=os.environ.get("DOTA_DB_DATABASE", "dota2_stats"))
+    parser.add_argument("--database", default=os.environ.get("DOTA_DB_DATABASE", "dota2_analysis"))
     parser.add_argument("--db-host", default=os.environ.get("DOTA_DB_HOST", "127.0.0.1"))
     parser.add_argument("--db-port", type=int, default=int(os.environ.get("DOTA_DB_PORT", "9030")))
     parser.add_argument("--db-user", default=os.environ.get("DOTA_DB_USER", ""))

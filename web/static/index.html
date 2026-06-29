@@ -4,117 +4,207 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dota 2 战队视野分析</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0e1218;
-      --surface: #151b24;
-      --surface-2: #1b2430;
-      --surface-3: #101720;
-      --line: #2b3746;
-      --text: #edf3f8;
-      --muted: #9aaabc;
-      --green: #48d07f;
+      --bg: #070a10;
+      --bg-2: #0a0e16;
+      --surface: #111824;
+      --surface-2: #16202e;
+      --surface-3: #0c121b;
+      --line: #233244;
+      --line-soft: #1a2533;
+      --text: #eaf2fb;
+      --muted: #8497ab;
+      --green: #4cd08a;
       --blue: #58b7ff;
-      --gold: #f2c55c;
-      --red: #f06464;
+      --gold: #f4c95c;
+      --red: #f26a6a;
       --violet: #b79cff;
-      --shadow: rgba(0, 0, 0, 0.24);
-      font-family: Arial, "Microsoft YaHei", sans-serif;
+      --cyan: #2bd6e6;
+      --radiant: #4cd08a;
+      --dire: #f26a6a;
+      --shadow: rgba(0, 0, 0, 0.45);
+      --glow-blue: rgba(88, 183, 255, 0.55);
+      --glow-cyan: rgba(43, 214, 230, 0.45);
+      font-family: "Segoe UI", Arial, "Microsoft YaHei", sans-serif;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       color: var(--text);
-      background: var(--bg);
+      background:
+        radial-gradient(1100px 600px at 12% -8%, rgba(43, 214, 230, 0.10), transparent 60%),
+        radial-gradient(1000px 620px at 100% 0%, rgba(88, 183, 255, 0.10), transparent 55%),
+        radial-gradient(900px 700px at 50% 120%, rgba(183, 156, 255, 0.07), transparent 60%),
+        var(--bg);
+      background-attachment: fixed;
     }
+    ::selection { background: rgba(88, 183, 255, 0.32); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: #233244; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+    ::-webkit-scrollbar-thumb:hover { background: #2f4459; background-clip: content-box; }
     button, input, select {
       font: inherit;
     }
     button {
-      min-height: 36px;
-      border: 1px solid #3a495d;
-      border-radius: 8px;
-      background: #202b3a;
+      min-height: 38px;
+      border: 1px solid #2c3d52;
+      border-radius: 9px;
+      background: linear-gradient(180deg, #1a2433, #141d29);
       color: var(--text);
-      padding: 8px 12px;
+      padding: 8px 14px;
       cursor: pointer;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      transition: border-color .15s, box-shadow .15s, transform .08s, background .15s;
     }
+    button:hover {
+      border-color: #3c597a;
+      box-shadow: 0 0 0 1px rgba(88, 183, 255, 0.15), 0 6px 16px rgba(0, 0, 0, 0.35);
+    }
+    button:active { transform: translateY(1px); }
     button.primary {
-      background: #256dff;
-      border-color: #256dff;
+      background: linear-gradient(180deg, #2f8bff, #1f63e8);
+      border-color: #2f8bff;
       font-weight: 700;
+      box-shadow: 0 0 18px rgba(47, 139, 255, 0.35);
+    }
+    button.primary:hover {
+      box-shadow: 0 0 24px rgba(47, 139, 255, 0.55);
     }
     button.ghost {
       background: transparent;
+      border-color: var(--line);
     }
     button:disabled {
       cursor: not-allowed;
-      opacity: 0.55;
+      opacity: 0.45;
+      box-shadow: none;
     }
     input, select {
       width: 100%;
-      height: 38px;
+      height: 40px;
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #0f1620;
+      border-radius: 9px;
+      background: #0b121c;
       color: var(--text);
-      padding: 0 10px;
+      padding: 0 12px;
       outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus, select:focus {
+      border-color: #2f8bff;
+      box-shadow: 0 0 0 3px rgba(47, 139, 255, 0.18);
     }
     label {
       display: block;
       color: var(--muted);
       font-size: 12px;
       margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
     }
     main {
       width: min(1480px, calc(100% - 36px));
       margin: 0 auto;
-      padding: 24px 0 56px;
+      padding: 0 0 64px;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      margin: 0 -9999px 18px;
+      padding: 16px 9999px 14px;
+      background: linear-gradient(180deg, rgba(10, 14, 22, 0.92), rgba(10, 14, 22, 0.72));
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .topbar::after {
+      content: "";
+      position: absolute;
+      left: 0; right: 0; bottom: -1px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cyan), var(--blue), var(--violet), transparent);
+      opacity: 0.85;
     }
     header {
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
+      align-items: center;
       gap: 16px;
-      margin-bottom: 18px;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-mark {
+      width: 40px; height: 40px; flex: none;
+      border-radius: 11px;
+      display: grid; place-items: center;
+      font-weight: 900; font-size: 18px; color: #06101c;
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+      box-shadow: 0 0 22px rgba(43, 214, 230, 0.45);
     }
     h1, h2, h3 { margin: 0; }
-    h1 { font-size: clamp(25px, 3vw, 38px); }
-    h2 { font-size: 19px; }
-    h3 { font-size: 15px; }
+    h1 {
+      font-size: clamp(20px, 2.2vw, 28px);
+      font-weight: 800;
+      letter-spacing: 0.4px;
+    }
+    h1 .accent {
+      background: linear-gradient(90deg, var(--cyan), var(--blue));
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    h2 { font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
+    h3 { font-size: 15px; font-weight: 700; }
     .subtitle {
-      max-width: 780px;
+      max-width: 820px;
       color: var(--muted);
       line-height: 1.55;
-      margin-top: 8px;
+      margin-top: 6px;
+      font-size: 13px;
     }
     .status {
       min-height: 20px;
       color: var(--muted);
       font-size: 13px;
+      text-align: right;
+      max-width: 420px;
     }
     .status.error {
-      color: #ffaaaa;
+      color: #ffb0b0;
     }
     .tabs {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
       margin: 16px 0;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tabs button {
+      position: relative;
+      background: rgba(255, 255, 255, 0.02);
+      border-color: var(--line-soft);
+      color: var(--muted);
+      white-space: nowrap;
     }
     .tabs button.active {
-      border-color: var(--blue);
-      color: #dceeff;
-      background: #1e3349;
+      border-color: rgba(88, 183, 255, 0.55);
+      color: #e8f4ff;
+      background: linear-gradient(180deg, rgba(47, 139, 255, 0.22), rgba(47, 139, 255, 0.08));
+      box-shadow: 0 0 16px rgba(47, 139, 255, 0.22);
     }
     .panel {
-      background: var(--surface);
+      position: relative;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 40%),
+        var(--surface);
       border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: 0 12px 24px var(--shadow);
-      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 16px 32px var(--shadow);
+      padding: 18px;
     }
     .search-grid {
       display: grid;
@@ -131,46 +221,98 @@
       flex-wrap: wrap;
     }
     .quick-row {
-      margin-top: 12px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line-soft);
     }
     .check {
-      min-height: 36px;
+      min-height: 38px;
       display: inline-flex;
       align-items: center;
       gap: 7px;
       color: var(--muted);
       font-size: 13px;
+      padding: 0 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.02);
     }
     .check input {
       width: auto;
       height: auto;
+      accent-color: var(--blue);
     }
     .summary-grid {
       display: grid;
-      grid-template-columns: repeat(6, minmax(130px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 10px;
       margin-top: 14px;
     }
     .metric {
-      background: var(--surface-2);
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(180deg, var(--surface-2), var(--surface-3));
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      min-height: 78px;
+      border-radius: 11px;
+      padding: 13px 14px;
+      min-height: 84px;
+      transition: border-color .15s, transform .12s, box-shadow .15s;
+    }
+    .metric::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--cyan), transparent);
+      opacity: 0.5;
+    }
+    .metric:hover {
+      border-color: rgba(88, 183, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
     }
     .metric .name {
       color: var(--muted);
-      font-size: 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
     }
     .metric .value {
-      font-size: 25px;
+      font-size: 26px;
       font-weight: 800;
-      margin-top: 7px;
+      margin-top: 8px;
+      line-height: 1.1;
+      text-shadow: 0 0 18px rgba(88, 183, 255, 0.28);
     }
     .metric .hint {
       color: var(--muted);
       font-size: 11px;
       margin-top: 4px;
+    }
+    .chart-box {
+      width: 100%;
+      height: 260px;
+    }
+    .chart-box.radar { height: 300px; }
+    .chart-fallback {
+      display: grid;
+      place-items: center;
+      height: 100%;
+      min-height: 180px;
+      color: var(--muted);
+      font-size: 13px;
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.015);
+      text-align: center;
+      padding: 18px;
+    }
+    .viz-grid {
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      gap: 14px;
+      margin-top: 14px;
+      align-items: start;
     }
     .match-layout {
       display: grid;
@@ -190,11 +332,23 @@
       display: grid;
       grid-template-columns: auto 1fr;
       gap: 10px;
-      padding: 11px;
+      padding: 12px;
       background: var(--surface-3);
-      border: 1px solid var(--line);
-      border-radius: 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s, box-shadow .15s;
     }
+    .match-card:hover {
+      border-color: rgba(88, 183, 255, 0.4);
+      background: var(--surface-2);
+    }
+    .match-card:has(input:checked) {
+      border-color: rgba(76, 208, 138, 0.6);
+      box-shadow: inset 3px 0 0 var(--green), 0 0 16px rgba(76, 208, 138, 0.12);
+      background: linear-gradient(180deg, rgba(76, 208, 138, 0.08), transparent);
+    }
+    .match-card input { accent-color: var(--green); }
     .match-title {
       font-weight: 700;
       line-height: 1.35;
@@ -218,12 +372,21 @@
       border: 1px solid var(--line);
       border-radius: 999px;
       color: var(--muted);
-      padding: 4px 9px;
+      padding: 4px 11px;
       font-size: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      white-space: nowrap;
     }
-    .pill.good { color: #bdffd3; border-color: rgba(72, 208, 127, 0.65); }
-    .pill.warn { color: #ffe0a3; border-color: rgba(242, 197, 92, 0.72); }
-    .pill.bad { color: #ffb8b8; border-color: rgba(240, 100, 100, 0.72); }
+    .pill::before {
+      content: "";
+      width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 8px currentColor;
+      opacity: 0.85;
+    }
+    .pill.good { color: #9bf2c2; border-color: rgba(76, 208, 138, 0.6); background: rgba(76, 208, 138, 0.08); }
+    .pill.warn { color: #ffdf9e; border-color: rgba(244, 201, 92, 0.65); background: rgba(244, 201, 92, 0.08); }
+    .pill.bad { color: #ffb0b0; border-color: rgba(242, 106, 106, 0.65); background: rgba(242, 106, 106, 0.08); }
     .section {
       display: none;
     }
@@ -239,6 +402,7 @@
     .map-card {
       overflow: hidden;
       padding: 0;
+      position: relative;
     }
     .map-head {
       display: flex;
@@ -246,17 +410,36 @@
       gap: 12px;
       align-items: center;
       padding: 14px 16px;
-      background: var(--surface-2);
+      background: linear-gradient(180deg, var(--surface-2), rgba(22, 32, 46, 0.4));
       border-bottom: 1px solid var(--line);
     }
+    .map-tip {
+      position: absolute;
+      z-index: 8;
+      pointer-events: none;
+      display: none;
+      max-width: 230px;
+      padding: 8px 10px;
+      border-radius: 9px;
+      background: rgba(7, 11, 18, 0.94);
+      border: 1px solid rgba(88, 183, 255, 0.5);
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.5;
+      transform: translate(-50%, calc(-100% - 12px));
+    }
+    .map-tip .tip-title { font-weight: 700; color: #dcefff; margin-bottom: 3px; }
+    .map-tip .tip-row { color: var(--muted); }
     .map-controls {
-      display: grid;
-      grid-template-columns: auto 1fr auto auto auto;
+      display: flex;
+      flex-wrap: wrap;
       gap: 10px;
       align-items: center;
       padding: 12px 16px;
       border-bottom: 1px solid var(--line);
     }
+    .map-controls input[type="range"] { flex: 1 1 220px; min-width: 160px; }
     .map-canvas {
       width: 100%;
       height: auto;
@@ -266,19 +449,95 @@
     .legend {
       display: flex;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 14px;
       padding: 10px 16px 14px;
       color: var(--muted);
       font-size: 12px;
       border-top: 1px solid var(--line);
     }
+    .legend span { display: inline-flex; align-items: center; }
     .dot {
       width: 9px;
       height: 9px;
       display: inline-block;
       border-radius: 50%;
-      margin-right: 5px;
+      margin-right: 6px;
+      box-shadow: 0 0 8px currentColor;
     }
+    .clock {
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      color: var(--cyan);
+      text-shadow: 0 0 12px var(--glow-cyan);
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      padding: 0;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #2f8bff, #2bd6e6);
+      box-shadow: 0 0 12px rgba(43, 214, 230, 0.3);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: #eaf2fb;
+      border: 2px solid #2f8bff;
+      box-shadow: 0 0 10px rgba(47, 139, 255, 0.7);
+      cursor: pointer;
+    }
+    .slider-wrap { position: relative; flex: 1 1 220px; min-width: 160px; display: flex; align-items: center; }
+    .slider-wrap input[type="range"] { width: 100%; }
+    .slider-ticks {
+      position: absolute; left: 0; right: 0; top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none; height: 14px;
+    }
+    .slider-ticks i {
+      position: absolute; top: 0;
+      width: 2px; height: 14px;
+      background: var(--gold); opacity: 0.5;
+      border-radius: 1px; transform: translateX(-1px);
+      box-shadow: 0 0 6px var(--gold);
+    }
+    .team-chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 8px 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      font-size: 13px; font-weight: 600;
+    }
+    .team-chip .swatch { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+    .team-chip.focus { border-color: rgba(244,201,92,0.6); }
+    .team-chip .chip-x {
+      min-height: 0; padding: 0 6px; line-height: 18px;
+      border-radius: 6px; border: none; background: rgba(255,255,255,0.06); color: var(--muted);
+    }
+    .team-chip .chip-x:hover { background: rgba(242,106,106,0.25); color: #ffd0d0; box-shadow: none; }
+    .board-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .board-tabs button {
+      min-height: 32px;
+      padding: 5px 11px;
+      font-size: 12.5px;
+      background: rgba(255, 255, 255, 0.02);
+      border-color: var(--line-soft);
+      color: var(--muted);
+    }
+    .board-tabs button.active {
+      border-color: rgba(88, 183, 255, 0.55);
+      color: #e8f4ff;
+      background: linear-gradient(180deg, rgba(47, 139, 255, 0.2), rgba(47, 139, 255, 0.06));
+    }
+    .speed-group { display: inline-flex; border: 1px solid var(--line-soft); border-radius: 9px; overflow: hidden; }
+    .speed-group button {
+      min-height: 34px; border: none; border-radius: 0;
+      padding: 4px 10px; font-size: 12px; background: transparent; color: var(--muted);
+    }
+    .speed-group button.active { background: rgba(47, 139, 255, 0.22); color: #e8f4ff; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -292,22 +551,27 @@
     }
     th {
       color: var(--muted);
-      background: rgba(255, 255, 255, 0.025);
+      background: #0e1622;
       position: sticky;
       top: 0;
       z-index: 1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
     }
+    tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
     tr.clickable {
       cursor: pointer;
     }
     tr.clickable:hover {
-      background: rgba(88, 183, 255, 0.08);
+      background: rgba(88, 183, 255, 0.1);
     }
     .table-wrap {
       max-height: 560px;
       overflow: auto;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 10px;
       margin-top: 10px;
     }
     .muted {
@@ -315,10 +579,17 @@
     }
     .empty {
       color: var(--muted);
-      padding: 18px;
+      padding: 26px 20px;
       border: 1px dashed var(--line);
-      border-radius: 8px;
-      background: rgba(255,255,255,0.02);
+      border-radius: 11px;
+      background: rgba(255,255,255,0.015);
+      text-align: center;
+      line-height: 1.6;
+    }
+    .section { animation: fadeIn .22s ease; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
     }
     .side-panel {
       display: grid;
@@ -362,18 +633,14 @@
     @media (max-width: 1120px) {
       .search-grid,
       .match-layout,
-      .result-layout {
+      .result-layout,
+      .viz-grid {
         grid-template-columns: 1fr;
-      }
-      .summary-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       .map-controls {
         grid-template-columns: 1fr;
       }
-      header {
-        display: block;
-      }
+      .status { text-align: left; max-width: none; }
     }
     @media (max-width: 720px) {
       main {
@@ -385,20 +652,28 @@
       .toolbar {
         align-items: stretch;
       }
+      header { flex-direction: column; align-items: flex-start; gap: 10px; }
+      .status { text-align: left; }
+      h1 { font-size: 22px; }
     }
   </style>
 </head>
 <body>
   <main>
-    <header>
-      <div>
-        <h1>Dota 2 战队视野分析</h1>
-        <div class="subtitle">
-          从战队开始研究视野习惯：先筛选比赛，再计算眼位实际看到的敌方英雄、真眼覆盖隐身收益，以及每场比赛的秒级地图时间轴。
+    <div class="topbar">
+      <header>
+        <div class="brand">
+          <div class="brand-mark">V</div>
+          <div>
+            <h1><span class="accent">Dota 2</span> 战队视野分析</h1>
+            <div class="subtitle">
+              从战队开始研究视野习惯：先筛选比赛，再计算眼位实际看到的敌方英雄、真眼覆盖隐身收益，以及每场比赛的秒级地图时间轴。
+            </div>
+          </div>
         </div>
-      </div>
-      <div id="status" class="status"></div>
-    </header>
+        <div id="status" class="status"></div>
+      </header>
+    </div>
 
     <section class="panel">
       <div class="search-grid">
@@ -454,6 +729,7 @@
       <button data-section="timeline">单场时间轴</button>
       <button data-section="details">明细与导出</button>
       <button data-section="roadmap">点位库与排行榜</button>
+      <button data-section="compare">战队对比</button>
     </nav>
 
     <section id="overview" class="section active">
@@ -501,6 +777,34 @@
         <div id="wardValueContent" class="empty" style="margin-top:12px">先在“比赛样本”里选择比赛，然后点击“计算点位库”。</div>
       </div>
     </section>
+
+    <section id="compare" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div>
+            <h2>多战队眼位对比</h2>
+            <div class="subtitle">添加 2-6 支战队，每队自动取最近 N 场比赛。所有战队的眼位会放进同一次聚类，从而在“同一个点位”上横向比较使用率、价值分与被排率。第一支战队作为分析对象，其余作为对比基准。</div>
+          </div>
+        </div>
+        <div class="quick-row" style="margin-top:14px;border-top:none;padding-top:0">
+          <div style="min-width:180px">
+            <label for="cmpTeamTag">战队 Tag</label>
+            <input id="cmpTeamTag" placeholder="例如 KRD" />
+          </div>
+          <div style="width:140px">
+            <label for="cmpRecent">最近场数</label>
+            <input id="cmpRecent" type="number" min="1" max="50" value="10" />
+          </div>
+          <div class="actions" style="align-self:end">
+            <button id="cmpAddTeam" class="primary">添加战队</button>
+            <button id="cmpCompute" disabled>计算对比</button>
+            <button id="cmpClear" class="ghost">清空</button>
+          </div>
+        </div>
+        <div id="cmpTeamChips" class="pill-row" style="margin-top:12px"></div>
+      </div>
+      <div id="compareContent" class="empty" style="margin-top:14px">添加至少两支战队后点击“计算对比”。</div>
+    </section>
   </main>
 
   <script>
@@ -514,7 +818,60 @@
       mapImage: null,
       timers: new Map(),
       filters: new Map(),
+      charts: new Map(),
+      playSpeed: 1,
+      comparisonTeams: [],
+      comparison: null,
     };
+
+    const TEAM_PALETTE = ["#58b7ff", "#f4c95c", "#4cd08a", "#b79cff", "#f26a6a", "#2bd6e6"];
+    function teamColor(index) {
+      return TEAM_PALETTE[index % TEAM_PALETTE.length];
+    }
+
+    const CHART_COLORS = {
+      text: "#cdd9e5",
+      muted: "#8497ab",
+      grid: "rgba(80, 100, 120, 0.16)",
+      blue: "#58b7ff",
+      cyan: "#2bd6e6",
+      green: "#4cd08a",
+      gold: "#f4c95c",
+      red: "#f26a6a",
+      violet: "#b79cff",
+    };
+
+    function hasECharts() {
+      return typeof window !== "undefined" && typeof window.echarts !== "undefined";
+    }
+
+    function makeChart(id, option) {
+      const dom = document.getElementById(id);
+      if (!dom) return;
+      if (!hasECharts()) {
+        dom.innerHTML = `<div class="chart-fallback">图表库未加载（可能离线）。<br>表格与地图数据仍然可用。</div>`;
+        return;
+      }
+      const existing = window.echarts.getInstanceByDom(dom);
+      if (existing) existing.dispose();
+      const chart = window.echarts.init(dom, null, { renderer: "canvas" });
+      chart.setOption(option);
+      state.charts.set(id, chart);
+    }
+
+    function resizeCharts() {
+      for (const [id, chart] of state.charts) {
+        const dom = document.getElementById(id);
+        if (!dom || !dom.isConnected) {
+          chart.dispose();
+          state.charts.delete(id);
+          continue;
+        }
+        chart.resize();
+      }
+    }
+
+    window.addEventListener("resize", resizeCharts);
 
     const el = {
       status: document.getElementById("status"),
@@ -540,6 +897,13 @@
       detailsContent: document.getElementById("detailsContent"),
       computeWardValue: document.getElementById("computeWardValue"),
       wardValueContent: document.getElementById("wardValueContent"),
+      cmpTeamTag: document.getElementById("cmpTeamTag"),
+      cmpRecent: document.getElementById("cmpRecent"),
+      cmpAddTeam: document.getElementById("cmpAddTeam"),
+      cmpCompute: document.getElementById("cmpCompute"),
+      cmpClear: document.getElementById("cmpClear"),
+      cmpTeamChips: document.getElementById("cmpTeamChips"),
+      compareContent: document.getElementById("compareContent"),
     };
 
     function setStatus(message, isError = false) {
@@ -569,6 +933,7 @@
       for (const button of document.querySelectorAll("[data-section]")) {
         button.classList.toggle("active", button.dataset.section === id);
       }
+      requestAnimationFrame(resizeCharts);
     }
 
     function fmtTime(value) {
@@ -640,6 +1005,78 @@
 
     function card(name, value, hint = "") {
       return `<div class="metric"><div class="name">${name}</div><div class="value">${value}</div>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`;
+    }
+
+    function radarOption(indicators, values, name) {
+      return {
+        textStyle: { color: CHART_COLORS.text, fontFamily: "inherit" },
+        tooltip: { trigger: "item" },
+        radar: {
+          indicator: indicators,
+          radius: "66%",
+          center: ["50%", "54%"],
+          axisName: { color: CHART_COLORS.muted, fontSize: 11 },
+          splitNumber: 4,
+          splitLine: { lineStyle: { color: CHART_COLORS.grid } },
+          axisLine: { lineStyle: { color: CHART_COLORS.grid } },
+          splitArea: { areaStyle: { color: ["rgba(88,183,255,0.02)", "rgba(88,183,255,0.05)"] } },
+        },
+        series: [{
+          type: "radar",
+          data: [{
+            value: values,
+            name,
+            symbolSize: 5,
+            lineStyle: { color: CHART_COLORS.cyan, width: 2 },
+            itemStyle: { color: CHART_COLORS.cyan },
+            areaStyle: { color: "rgba(43,214,230,0.22)" },
+          }],
+        }],
+      };
+    }
+
+    function doughnutOption(data) {
+      return {
+        textStyle: { color: CHART_COLORS.text, fontFamily: "inherit" },
+        tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+        legend: { bottom: 0, textStyle: { color: CHART_COLORS.muted }, icon: "circle" },
+        series: [{
+          type: "pie",
+          radius: ["52%", "76%"],
+          center: ["50%", "44%"],
+          avoidLabelOverlap: true,
+          itemStyle: { borderColor: "#0c121b", borderWidth: 2 },
+          label: { show: false },
+          data,
+        }],
+      };
+    }
+
+    function barOption(names, values, color) {
+      return {
+        textStyle: { color: CHART_COLORS.text, fontFamily: "inherit" },
+        tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+        grid: { left: 6, right: 18, top: 10, bottom: 6, containLabel: true },
+        xAxis: {
+          type: "value",
+          axisLabel: { color: CHART_COLORS.muted },
+          axisLine: { lineStyle: { color: CHART_COLORS.grid } },
+          splitLine: { lineStyle: { color: CHART_COLORS.grid } },
+        },
+        yAxis: {
+          type: "category",
+          inverse: true,
+          data: names,
+          axisLabel: { color: CHART_COLORS.text },
+          axisLine: { lineStyle: { color: CHART_COLORS.grid } },
+        },
+        series: [{
+          type: "bar",
+          data: values,
+          barWidth: "62%",
+          itemStyle: { color, borderRadius: [0, 4, 4, 0] },
+        }],
+      };
     }
 
     function confidence(count) {
@@ -745,12 +1182,24 @@
       const observerCount = (report.matches || []).reduce((sum, match) => sum + ((match.wardCounts || {}).observer || 0), 0);
       const sentryCount = (report.matches || []).reduce((sum, match) => sum + ((match.wardCounts || {}).sentry || 0), 0);
       const highValue = (report.matches || []).reduce((sum, match) => sum + (((match.wardValueSummary || {}).high) || 0), 0);
+      const normalValue = (report.matches || []).reduce((sum, match) => sum + (((match.wardValueSummary || {}).normal) || 0), 0);
       const lowValue = (report.matches || []).reduce((sum, match) => {
         const summary = match.wardValueSummary || {};
         return sum + (summary.low || 0) + (summary.none || 0);
       }, 0);
       const [level, cls] = confidence(matchCount);
       const cacheText = report.cache && report.cache.hit ? "缓存命中" : "本次新计算";
+      const mc = matchCount || 1;
+      const radarRefs = [
+        { name: "Hero-seconds", value: (totals.heroSeconds || 0) / mc, ref: 1500 },
+        { name: "Unique 秒", value: (totals.uniqueSeconds || 0) / mc, ref: 1000 },
+        { name: "Appearances", value: (totals.appearances || 0) / mc, ref: 200 },
+        { name: "隐身可见", value: (totals.invisibleHeroSeconds || 0) / mc, ref: 120 },
+        { name: "Obs 贡献", value: (totals.observerContributionHeroSeconds || 0) / mc, ref: 1200 },
+        { name: "高价值眼占比", value: observerCount ? (highValue / observerCount) * 100 : 0, ref: 100 },
+      ];
+      const radarValues = radarRefs.map(item => Math.min(100, Math.round((item.value / item.ref) * 100)));
+      const radarIndicators = radarRefs.map(item => ({ name: item.name, max: 100 }));
       el.overviewContent.className = "panel";
       el.overviewContent.innerHTML = `
         <div class="toolbar">
@@ -779,7 +1228,25 @@
           ${card("地图版本", "7.41")}
           ${card("时间段", el.timePreset.options[el.timePreset.selectedIndex].text)}
         </div>
+        <div class="viz-grid">
+          <div class="panel" style="background:var(--surface-3)">
+            <h3>战队视野风格画像</h3>
+            <div class="subtitle" style="margin-top:4px">单场均值按参考基准归一化到 0-100，用于观察视野风格倾向。</div>
+            <div id="overviewRadar" class="chart-box radar"></div>
+          </div>
+          <div class="panel" style="background:var(--surface-3)">
+            <h3>假眼价值分布</h3>
+            <div class="subtitle" style="margin-top:4px">按假眼贡献的价值等级统计：高价值 / 普通 / 低或无收益。</div>
+            <div id="overviewValuePie" class="chart-box"></div>
+          </div>
+        </div>
       `;
+      makeChart("overviewRadar", radarOption(radarIndicators, radarValues, el.teamTag.value.trim().toUpperCase() || "Team"));
+      makeChart("overviewValuePie", doughnutOption([
+        { name: "高价值", value: highValue, itemStyle: { color: CHART_COLORS.gold } },
+        { name: "普通", value: normalValue, itemStyle: { color: CHART_COLORS.blue } },
+        { name: "低/无收益", value: lowValue, itemStyle: { color: CHART_COLORS.red } },
+      ]));
     }
 
     function loadMapImage() {
@@ -788,7 +1255,7 @@
           resolve(state.mapImage);
           return;
         }
-        const source = state.report?.source || state.wardValue?.source || null;
+        const source = state.report?.source || state.wardValue?.source || state.comparison?.source || null;
         const map = source ? source.map : null;
         if (!map || !map.imageUrl) {
           reject(new Error("缺少地图配置"));
@@ -924,6 +1391,13 @@
       const initialTime = state.pendingTimelineTime == null
         ? start
         : Math.max(start, Math.min(end, Number(state.pendingTimelineTime)));
+      const span = Math.max(1, end - start);
+      const eventTicks = [...new Set(((active.map || {}).wards || [])
+        .map(ward => ward.start)
+        .filter(value => value != null && value >= start && value <= end))];
+      const eventTicksMarkup = eventTicks
+        .map(value => `<i style="left:${(((value - start) / span) * 100).toFixed(2)}%"></i>`)
+        .join("");
       el.timelineContent.className = "";
       el.timelineContent.innerHTML = `
         <div class="toolbar" style="margin-bottom:12px">
@@ -944,13 +1418,21 @@
             <div class="map-head">
               <div>
                 <h2>${active.teamTag} vs ${active.enemyTeamTag}</h2>
-                <div class="muted">Match ${active.matchId} · ${active.teamSide} 视角 · <span data-clock="${active.matchId}">${fmtTime(start)}</span></div>
+                <div class="muted">Match ${active.matchId} · ${active.teamSide} 视角 · <span class="clock" data-clock="${active.matchId}">${fmtTime(start)}</span></div>
               </div>
               <span class="pill" data-count="${active.matchId}"></span>
             </div>
             <div class="map-controls">
-              <button data-play="${active.matchId}">播放</button>
-              <input data-slider="${active.matchId}" type="range" min="${start}" max="${end}" value="${initialTime}" />
+              <button data-play="${active.matchId}" class="primary">播放</button>
+              <div class="speed-group" data-speed-group="${active.matchId}">
+                <button data-speed="0.5">0.5x</button>
+                <button data-speed="1" class="active">1x</button>
+                <button data-speed="2">2x</button>
+              </div>
+              <div class="slider-wrap">
+                <input data-slider="${active.matchId}" type="range" min="${start}" max="${end}" value="${initialTime}" />
+                <div class="slider-ticks" title="眼位放置时间点">${eventTicksMarkup}</div>
+              </div>
               <label class="check"><input data-show-vision="${active.matchId}" type="checkbox" checked /> 假眼 FoW</label>
               <label class="check"><input data-high-only="${active.matchId}" type="checkbox" /> 只看高价值眼</label>
               <button data-clear-filter="${active.matchId}" class="ghost">清除过滤</button>
@@ -964,17 +1446,39 @@
             </div>
           </article>
           <aside class="side-panel">
+            <div class="panel">
+              <h2>敌方英雄可见秒数 Top</h2>
+              <div id="timelineHeroChart" class="chart-box" style="height:240px;margin-top:8px"></div>
+            </div>
             ${renderHeroTable(active)}
             ${renderWardTable(active)}
           </aside>
         </div>
       `;
+      renderTimelineChart(active);
       document.getElementById("timelineMatch").addEventListener("change", event => {
         state.activeMatchId = Number(event.target.value);
         stopTimers();
         renderTimeline();
         initMaps();
       });
+    }
+
+    function renderTimelineChart(match) {
+      const heroes = [...(match.enemyHeroes || [])]
+        .sort((a, b) => (b.visibleSeconds || 0) - (a.visibleSeconds || 0))
+        .slice(0, 10)
+        .reverse();
+      if (!heroes.length) {
+        const dom = document.getElementById("timelineHeroChart");
+        if (dom) dom.innerHTML = `<div class="chart-fallback">没有可见英雄记录。</div>`;
+        return;
+      }
+      makeChart("timelineHeroChart", barOption(
+        heroes.map(hero => cleanHeroName(hero.heroName)),
+        heroes.map(hero => hero.visibleSeconds || 0),
+        CHART_COLORS.green,
+      ));
     }
 
     function renderHeroTable(match) {
@@ -1060,11 +1564,24 @@
       const observer = ((report.leaderboards || {}).observer || {}).bestOverall || [];
       const sentry = ((report.leaderboards || {}).sentry || {}).bestAntiInvis || [];
       const spotBoards = report.spotLeaderboards || {};
+      const [level, cls] = confidence(s.matchCount || 0);
+      const boards = [
+        { key: "mostUsed", title: "最常用点位", type: "spot", data: spotBoards.mostUsed || [] },
+        { key: "stableHighValue", title: "稳定高价值", type: "spot", data: spotBoards.stableHighValue || [] },
+        { key: "highRisk", title: "高风险", type: "spot", data: spotBoards.highRisk || [] },
+        { key: "opening", title: "开局固定", type: "spot", data: spotBoards.opening || [] },
+        { key: "longLived", title: "长存活", type: "spot", data: spotBoards.longLived || [] },
+        { key: "sentryTrueSight", title: "真视收益", type: "spot", data: spotBoards.sentryTrueSight || [] },
+        { key: "best", title: "最佳点位", type: "spot", data: best },
+        { key: "worst", title: "最差点位", type: "spot", data: worst },
+        { key: "obsInst", title: "最佳假眼实例", type: "instance", data: observer },
+        { key: "senInst", title: "最佳真眼实例", type: "instance", data: sentry },
+      ];
       el.wardValueContent.className = "";
       el.wardValueContent.innerHTML = `
         <div class="summary-grid">
           ${card("目标战队", (report.source || {}).teamTag || el.teamTag.value.trim())}
-          ${card("比赛数", s.matchCount || 0)}
+          ${card("比赛数", s.matchCount || 0, `置信度 ${level}`)}
           ${card("眼位实例", s.instanceCount || 0)}
           ${card("Observer", s.observerCount || 0)}
           ${card("Sentry", s.sentryCount || 0)}
@@ -1076,10 +1593,10 @@
             <div class="map-head">
               <div>
                 <h2>战队点位地图</h2>
-                <div class="muted">点大小代表样本量，颜色区分假眼/真眼，点击点位查看详情。</div>
+                <div class="muted">点大小代表样本量，颜色区分阵营/真眼，悬停查看摘要，点击查看详情。</div>
               </div>
               <div class="actions">
-                <select id="spotBoardFilter" style="width:180px">
+                <select id="spotBoardFilter" style="width:170px">
                   <option value="all">全部点位</option>
                   <option value="mostUsed">最常用</option>
                   <option value="stableHighValue">稳定高价值</option>
@@ -1087,9 +1604,10 @@
                   <option value="opening">开局固定</option>
                   <option value="sentryTrueSight">真视收益</option>
                 </select>
-                <span class="pill">${s.spotCount || 0} 个点位</span>
+                <span class="pill ${cls}">${s.spotCount || 0} 个点位</span>
               </div>
             </div>
+            <div class="map-tip" id="wardSpotTip"></div>
             <canvas class="map-canvas" id="wardSpotMap" width="851" height="851"></canvas>
             <div class="legend">
               <span><span class="dot" style="background:var(--green)"></span>Radiant Observer</span>
@@ -1102,28 +1620,41 @@
             <div id="spotDetail" class="empty" style="margin-top:10px">点击地图点位或排行榜行。</div>
           </aside>
         </div>
-        <div class="match-layout">
-          ${spotTable("最常用点位", spotBoards.mostUsed || [])}
-          ${spotTable("稳定高价值点位", spotBoards.stableHighValue || [])}
-          ${spotTable("高风险点位", spotBoards.highRisk || [])}
-          ${spotTable("开局固定点位", spotBoards.opening || [])}
-          ${spotTable("长存活点位", spotBoards.longLived || [])}
-          ${spotTable("真视收益点位", spotBoards.sentryTrueSight || [])}
-          ${spotTable("最佳点位", best)}
-          ${spotTable("最差点位", worst)}
-          ${instanceTable("最佳假眼实例", observer)}
-          ${instanceTable("最佳真眼实例", sentry)}
+        <div class="panel" style="margin-top:14px">
+          <div class="toolbar">
+            <h2>眼位排行榜</h2>
+            <div class="board-tabs" id="boardTabs">
+              ${boards.map((board, index) => `<button data-board="${board.key}" class="${index === 0 ? "active" : ""}">${board.title}</button>`).join("")}
+            </div>
+          </div>
+          <div id="boardTableArea" style="margin-top:12px"></div>
         </div>
       `;
+
+      const renderSpotBoard = key => {
+        const board = boards.find(item => item.key === key);
+        const area = document.getElementById("boardTableArea");
+        if (!board || !area) return;
+        area.innerHTML = board.type === "spot" ? spotTableBody(board.data) : instanceTableBody(board.data);
+        for (const button of document.querySelectorAll("#boardTabs [data-board]")) {
+          button.classList.toggle("active", button.dataset.board === key);
+        }
+        for (const row of area.querySelectorAll("[data-spot-id]")) {
+          row.addEventListener("click", () => selectWardSpot(row.dataset.spotId));
+        }
+      };
+
+      for (const button of document.querySelectorAll("#boardTabs [data-board]")) {
+        button.addEventListener("click", () => renderSpotBoard(button.dataset.board));
+      }
+      renderSpotBoard(boards[0].key);
+
       drawWardSpotMap();
       document.getElementById("spotBoardFilter")?.addEventListener("change", () => drawWardSpotMap());
-      for (const row of document.querySelectorAll("[data-spot-id]")) {
-        row.addEventListener("click", () => selectWardSpot(row.dataset.spotId));
-      }
     }
 
-    function spotTable(title, spots) {
-      if (!spots.length) return `<div class="panel"><h2>${title}</h2><div class="empty" style="margin-top:10px">暂无数据。</div></div>`;
+    function spotTableBody(spots) {
+      if (!spots.length) return `<div class="empty">暂无数据。</div>`;
       const rows = spots.slice(0, 20).map(spot => `
         <tr class="clickable" data-spot-id="${spot.spotId}">
           <td>${spot.spotId}<br><span class="muted">${spot.wardType} / ${spot.team}</span></td>
@@ -1132,17 +1663,14 @@
           <td>${spot.avgSeenSeconds}</td>
           <td>${spot.dewardRate == null ? "" : Math.round(spot.dewardRate * 100) + "%"}</td>
         </tr>`).join("");
-      return `<div class="panel">
-        <h2>${title}</h2>
-        <div class="table-wrap"><table>
+      return `<div class="table-wrap"><table>
           <thead><tr><th>点位</th><th>样本</th><th>均分</th><th>可见秒</th><th>被排率</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table></div>
-      </div>`;
+        </table></div>`;
     }
 
-    function instanceTable(title, instances) {
-      if (!instances.length) return `<div class="panel"><h2>${title}</h2><div class="empty" style="margin-top:10px">暂无数据。</div></div>`;
+    function instanceTableBody(instances) {
+      if (!instances.length) return `<div class="empty">暂无数据。</div>`;
       const rows = instances.slice(0, 20).map(item => `
         <tr class="clickable" data-spot-id="${item.spotId || ""}">
           <td>${item.matchId}<br><span class="muted">e${item.ehandle} · ${fmtTime(item.start)}</span></td>
@@ -1151,13 +1679,10 @@
           <td>${item.enemyHeroSeenSeconds || 0}</td>
           <td>${item.invisibleHeroTrueSightSeconds || 0}</td>
         </tr>`).join("");
-      return `<div class="panel">
-        <h2>${title}</h2>
-        <div class="table-wrap"><table>
+      return `<div class="table-wrap"><table>
           <thead><tr><th>实例</th><th>类型</th><th>分数</th><th>可见秒</th><th>真视秒</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table></div>
-      </div>`;
+        </table></div>`;
     }
 
     async function drawWardSpotMap(selectedSpotId = null) {
@@ -1187,17 +1712,23 @@
         const x = spot.pixel.x * sx;
         const y = spot.pixel.y * sy;
         const r = Math.max(4, Math.min(18, 4 + Math.sqrt(spot.sampleCount || 1) * 2));
+        const color = spot.wardType === "sen"
+          ? "rgba(88,183,255,0.78)"
+          : spot.team === "radiant" ? "rgba(76,208,138,0.78)" : "rgba(242,106,106,0.78)";
+        const isSelected = selectedSpotId === spot.spotId;
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = isSelected ? 22 : 10;
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = spot.wardType === "sen"
-          ? "rgba(88,183,255,0.72)"
-          : spot.team === "radiant" ? "rgba(72,208,127,0.72)" : "rgba(240,100,100,0.72)";
+        ctx.fillStyle = color;
         ctx.fill();
-        ctx.lineWidth = selectedSpotId === spot.spotId ? 4 : 1.5;
-        ctx.strokeStyle = selectedSpotId === spot.spotId ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.85)";
+        ctx.restore();
+        ctx.lineWidth = isSelected ? 4 : 1.5;
+        ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.85)";
         ctx.stroke();
       }
-      canvas.onclick = event => {
+      const nearestSpot = event => {
         const rect = canvas.getBoundingClientRect();
         const x = (event.clientX - rect.left) * canvas.width / rect.width;
         const y = (event.clientY - rect.top) * canvas.height / rect.height;
@@ -1214,7 +1745,34 @@
             best = spot;
           }
         }
+        return { best, bestD };
+      };
+      canvas.onclick = event => {
+        const { best, bestD } = nearestSpot(event);
         if (best && bestD < 24) selectWardSpot(best.spotId);
+      };
+      const tip = document.getElementById("wardSpotTip");
+      canvas.onmousemove = event => {
+        const { best, bestD } = nearestSpot(event);
+        if (tip && best && bestD < 24) {
+          const rect = canvas.getBoundingClientRect();
+          tip.style.left = `${event.clientX - rect.left}px`;
+          tip.style.top = `${event.clientY - rect.top}px`;
+          tip.style.display = "block";
+          tip.innerHTML = `
+            <div class="tip-title">${best.spotId}</div>
+            <div class="tip-row">${best.wardType} / ${best.team} · 样本 ${best.sampleCount}</div>
+            <div class="tip-row">均分 ${best.avgScore} · 可见 ${best.avgSeenSeconds}s</div>
+            <div class="tip-row">被排率 ${best.dewardRate == null ? "未知" : Math.round(best.dewardRate * 100) + "%"}</div>`;
+          canvas.style.cursor = "pointer";
+        } else if (tip) {
+          tip.style.display = "none";
+          canvas.style.cursor = "default";
+        }
+      };
+      canvas.onmouseleave = () => {
+        if (tip) tip.style.display = "none";
+        canvas.style.cursor = "default";
       };
     }
 
@@ -1311,6 +1869,17 @@
         state.filters.delete(active.matchId);
         draw();
       });
+      const speedGroup = document.querySelector(`[data-speed-group="${active.matchId}"]`);
+      const baseInterval = 180;
+      const startTimer = () => {
+        const timer = setInterval(() => {
+          let next = Number(slider.value) + 1;
+          if (next > Number(slider.max)) next = Number(slider.min);
+          slider.value = String(next);
+          draw();
+        }, Math.max(40, Math.round(baseInterval / state.playSpeed)));
+        state.timers.set(active.matchId, timer);
+      };
       play?.addEventListener("click", () => {
         const existing = state.timers.get(active.matchId);
         if (existing) {
@@ -1320,14 +1889,24 @@
           return;
         }
         play.textContent = "暂停";
-        const timer = setInterval(() => {
-          let next = Number(slider.value) + 1;
-          if (next > Number(slider.max)) next = Number(slider.min);
-          slider.value = String(next);
-          draw();
-        }, 180);
-        state.timers.set(active.matchId, timer);
+        startTimer();
       });
+      if (speedGroup) {
+        for (const button of speedGroup.querySelectorAll("[data-speed]")) {
+          button.classList.toggle("active", Number(button.dataset.speed) === state.playSpeed);
+          button.addEventListener("click", () => {
+            state.playSpeed = Number(button.dataset.speed);
+            for (const other of speedGroup.querySelectorAll("[data-speed]")) {
+              other.classList.toggle("active", other === button);
+            }
+            if (state.timers.get(active.matchId)) {
+              clearInterval(state.timers.get(active.matchId));
+              state.timers.delete(active.matchId);
+              startTimer();
+            }
+          });
+        }
+      }
       for (const row of document.querySelectorAll("[data-filter-match]")) {
         row.addEventListener("click", () => {
           const matchId = Number(row.dataset.filterMatch);
@@ -1499,6 +2078,347 @@
       downloadText(`team_vision_${team}.csv`, csv, "text/csv;charset=utf-8");
     }
 
+    function radarMultiOption(indicators, seriesList) {
+      return {
+        textStyle: { color: CHART_COLORS.text, fontFamily: "inherit" },
+        tooltip: { trigger: "item" },
+        legend: { bottom: 0, textStyle: { color: CHART_COLORS.muted }, icon: "circle" },
+        radar: {
+          indicator: indicators,
+          radius: "62%",
+          center: ["50%", "50%"],
+          axisName: { color: CHART_COLORS.muted, fontSize: 11 },
+          splitNumber: 4,
+          splitLine: { lineStyle: { color: CHART_COLORS.grid } },
+          axisLine: { lineStyle: { color: CHART_COLORS.grid } },
+          splitArea: { areaStyle: { color: ["rgba(88,183,255,0.02)", "rgba(88,183,255,0.05)"] } },
+        },
+        series: [{
+          type: "radar",
+          data: seriesList.map(item => ({
+            value: item.values,
+            name: item.name,
+            symbolSize: 4,
+            lineStyle: { color: item.color, width: 2 },
+            itemStyle: { color: item.color },
+            areaStyle: { color: item.color + "22" },
+          })),
+        }],
+      };
+    }
+
+    function renderCmpChips() {
+      el.cmpCompute.disabled = state.comparisonTeams.length < 2;
+      if (!state.comparisonTeams.length) {
+        el.cmpTeamChips.innerHTML = `<span class="muted">还没有添加战队。</span>`;
+        return;
+      }
+      el.cmpTeamChips.innerHTML = state.comparisonTeams.map((team, index) => `
+        <span class="team-chip ${index === 0 ? "focus" : ""}">
+          <span class="swatch" style="color:${teamColor(index)};background:${teamColor(index)}"></span>
+          ${team.teamTag.toUpperCase()} <span class="muted">${team.matchIds.length} 场${index === 0 ? " · 分析对象" : ""}</span>
+          <button class="chip-x" data-remove-team="${team.teamTag}">×</button>
+        </span>`).join("");
+      for (const button of el.cmpTeamChips.querySelectorAll("[data-remove-team]")) {
+        button.addEventListener("click", () => removeCmpTeam(button.dataset.removeTeam));
+      }
+    }
+
+    function removeCmpTeam(tag) {
+      state.comparisonTeams = state.comparisonTeams.filter(team => team.teamTag.toLowerCase() !== String(tag).toLowerCase());
+      renderCmpChips();
+    }
+
+    async function addCmpTeam() {
+      const tag = el.cmpTeamTag.value.trim();
+      if (!tag) {
+        setStatus("请输入要添加的战队 Tag。", true);
+        return;
+      }
+      if (state.comparisonTeams.length >= 6) {
+        setStatus("最多对比 6 支战队。", true);
+        return;
+      }
+      if (state.comparisonTeams.some(team => team.teamTag.toLowerCase() === tag.toLowerCase())) {
+        setStatus(`${tag.toUpperCase()} 已在对比列表中。`, true);
+        return;
+      }
+      const recent = Math.max(1, Math.min(50, Number(el.cmpRecent.value || 10)));
+      setStatus(`正在拉取 ${tag.toUpperCase()} 最近 ${recent} 场...`);
+      el.cmpAddTeam.disabled = true;
+      try {
+        const payload = await api(`/api/matches?team_tag=${encodeURIComponent(tag)}&limit=${recent}`);
+        const matchIds = (payload.matches || []).slice(0, recent).map(match => match.matchId);
+        if (!matchIds.length) {
+          setStatus(`没有查到 ${tag.toUpperCase()} 的比赛。`, true);
+          return;
+        }
+        state.comparisonTeams.push({ teamTag: tag, matchIds });
+        el.cmpTeamTag.value = "";
+        renderCmpChips();
+        setStatus(`已添加 ${tag.toUpperCase()}（${matchIds.length} 场）。`);
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        el.cmpAddTeam.disabled = false;
+      }
+    }
+
+    async function computeComparison() {
+      if (state.comparisonTeams.length < 2) return;
+      const window = selectedTimeWindow();
+      setStatus(`正在计算 ${state.comparisonTeams.length} 支战队的眼位对比...`);
+      el.cmpCompute.disabled = true;
+      try {
+        const report = await api("/api/teams/ward-comparison", {
+          method: "POST",
+          body: JSON.stringify({
+            teams: state.comparisonTeams.map(team => ({ teamTag: team.teamTag, matchIds: team.matchIds })),
+            start: window.start,
+            end: window.end,
+            forceRefresh: el.forceRefresh.checked,
+            clusterEps: 200,
+          }),
+        });
+        state.comparison = report;
+        renderComparison();
+        showSection("compare");
+        setStatus(report.cache && report.cache.hit ? "对比已从缓存读取。" : "对比计算完成，并已写入缓存。");
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        renderCmpChips();
+      }
+    }
+
+    function diagnosisTable(title, rows, hint) {
+      if (!rows.length) return `<div class="panel"><h3>${title}</h3><div class="empty" style="margin-top:10px">${hint}</div></div>`;
+      const body = rows.slice(0, 12).map(row => `
+        <tr>
+          <td>${row.spotId}<br><span class="muted">${row.wardType} / ${row.team}</span></td>
+          <td>${Math.round(row.focusUsageRate * 100)}%</td>
+          <td>${Math.round(row.benchmarkUsageRate * 100)}%</td>
+          <td>${row.usageDiff >= 0 ? "+" : ""}${Math.round(row.usageDiff * 100)}%</td>
+          <td>${row.avgScore == null ? "" : row.avgScore}</td>
+        </tr>`).join("");
+      return `<div class="panel"><h3>${title}</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>点位</th><th>本队</th><th>基准</th><th>差异</th><th>均分</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table></div></div>`;
+    }
+
+    function renderComparison() {
+      const report = state.comparison;
+      if (!report) {
+        el.compareContent.className = "empty";
+        el.compareContent.innerHTML = "添加至少两支战队后点击“计算对比”。";
+        return;
+      }
+      const tags = report.source.teamTags || [];
+      const focus = report.source.focusTeam;
+      const teams = report.teams || [];
+      const spots = report.spots || [];
+      const diag = report.diagnostics || {};
+      const maxSpotCount = Math.max(1, ...teams.map(team => team.spotCount || 0));
+
+      const summaryRows = teams.map((team, index) => `
+        <tr>
+          <td><span class="dot" style="background:${teamColor(index)};color:${teamColor(index)}"></span>${team.teamTag.toUpperCase()}${index === 0 ? " <span class=\"muted\">(分析)</span>" : ""}</td>
+          <td>${team.instanceCount}</td>
+          <td>${team.observerCount}/${team.sentryCount}</td>
+          <td>${team.spotCount}</td>
+          <td>${team.avgValueScore}</td>
+          <td>${team.avgSeenSeconds}s</td>
+          <td>${team.avgLifetimeSeconds}s</td>
+          <td>${team.dewardRate == null ? "-" : Math.round(team.dewardRate * 100) + "%"}</td>
+        </tr>`).join("");
+
+      const radarIndicators = [
+        { name: "价值分", max: 100 },
+        { name: "平均可见", max: 100 },
+        { name: "平均存活", max: 100 },
+        { name: "存活率", max: 100 },
+        { name: "真视收益", max: 100 },
+        { name: "点位多样", max: 100 },
+      ];
+      const radarSeries = teams.map((team, index) => ({
+        name: team.teamTag.toUpperCase(),
+        color: teamColor(index),
+        values: [
+          Math.min(100, Math.round(team.avgValueScore || 0)),
+          Math.min(100, Math.round((team.avgSeenSeconds || 0) / 60 * 100)),
+          Math.min(100, Math.round((team.avgLifetimeSeconds || 0) / 240 * 100)),
+          Math.round((1 - (team.dewardRate == null ? 0 : team.dewardRate)) * 100),
+          Math.min(100, Math.round((team.avgTrueSightSeconds || 0) / 30 * 100)),
+          Math.round((team.spotCount || 0) / maxSpotCount * 100),
+        ],
+      }));
+
+      const topSpots = [...spots].sort((a, b) => (b.sampleCount || 0) - (a.sampleCount || 0)).slice(0, 40);
+      const spotHead = `<tr><th>点位</th><th>样本</th><th>均分</th>${tags.map(tag => `<th>${tag.toUpperCase()} 用量</th>`).join("")}</tr>`;
+      const spotBody = topSpots.map(spot => `
+        <tr class="clickable" data-cmp-spot="${spot.spotId}">
+          <td>${spot.spotId}<br><span class="muted">${spot.wardType} / ${spot.team}</span></td>
+          <td>${spot.sampleCount}</td>
+          <td>${spot.avgScore}</td>
+          ${tags.map(tag => {
+            const cell = spot.byTeam[tag] || {};
+            return `<td>${cell.placements || 0} <span class="muted">(${Math.round((cell.usageRate || 0) * 100)}%)</span></td>`;
+          }).join("")}
+        </tr>`).join("");
+
+      el.compareContent.className = "";
+      el.compareContent.innerHTML = `
+        <div class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>对比结果</h2>
+              <div class="subtitle">分析对象：<strong>${focus.toUpperCase()}</strong>，基准为其余战队。点位按阵营+位置共享聚类。</div>
+            </div>
+            <div class="pill-row">
+              <span class="pill">${report.summary.teamCount} 支战队</span>
+              <span class="pill">${report.summary.spotCount} 个共享点位</span>
+              <span class="pill">${report.source.invisibilityDataAvailable ? "隐身数据可用" : "隐身数据缺失"}</span>
+            </div>
+          </div>
+          <div class="viz-grid">
+            <div class="panel" style="background:var(--surface-3)">
+              <h3>视野风格雷达对比</h3>
+              <div id="compareRadar" class="chart-box radar"></div>
+            </div>
+            <div class="panel" style="background:var(--surface-3);overflow:auto">
+              <h3>战队指标汇总</h3>
+              <div class="table-wrap" style="margin-top:8px"><table>
+                <thead><tr><th>战队</th><th>实例</th><th>Obs/Sen</th><th>点位</th><th>均分</th><th>可见</th><th>存活</th><th>被排率</th></tr></thead>
+                <tbody>${summaryRows}</tbody>
+              </table></div>
+            </div>
+          </div>
+        </div>
+        <div class="result-layout" style="margin-top:14px">
+          <article class="panel map-card">
+            <div class="map-head">
+              <div>
+                <h2>共享点位地图</h2>
+                <div class="muted">每个点按“使用该点位最多的战队”着色，点大小代表总样本量。</div>
+              </div>
+              <div class="pill-row" id="compareMapLegend"></div>
+            </div>
+            <div class="map-tip" id="compareTip"></div>
+            <canvas class="map-canvas" id="compareMap" width="851" height="851"></canvas>
+          </article>
+          <aside class="panel">
+            <h2>逐点位使用对比</h2>
+            <div class="table-wrap" style="margin-top:10px"><table>
+              <thead>${spotHead}</thead>
+              <tbody>${spotBody}</tbody>
+            </table></div>
+          </aside>
+        </div>
+        <div class="match-layout" style="margin-top:14px">
+          ${diagnosisTable(`${focus.toUpperCase()} 招牌点位`, diag.signatureSpots || [], "没有显著高于基准且有价值的点位。")}
+          ${diagnosisTable(`${focus.toUpperCase()} 高频低效点位`, diag.overusedLowValueSpots || [], "没有高频但低价值的点位。")}
+          ${diagnosisTable(`${focus.toUpperCase()} 高价值低使用点位`, diag.underusedHighValueSpots || [], "没有明显被低估的高价值点位。")}
+        </div>
+      `;
+
+      makeChart("compareRadar", radarMultiOption(radarIndicators, radarSeries));
+      el.compareContent.querySelector("#compareMapLegend").innerHTML = teams
+        .map((team, index) => `<span class="pill" style="color:${teamColor(index)}">${team.teamTag.toUpperCase()}</span>`)
+        .join("");
+      drawComparisonMap();
+      for (const row of el.compareContent.querySelectorAll("[data-cmp-spot]")) {
+        row.addEventListener("click", () => drawComparisonMap(row.dataset.cmpSpot));
+      }
+    }
+
+    function dominantTeamIndex(spot, tags) {
+      let bestIndex = -1;
+      let bestCount = 0;
+      tags.forEach((tag, index) => {
+        const count = (spot.byTeam[tag] || {}).placements || 0;
+        if (count > bestCount) {
+          bestCount = count;
+          bestIndex = index;
+        }
+      });
+      return bestIndex;
+    }
+
+    async function drawComparisonMap(selectedSpotId = null) {
+      if (!state.comparison) return;
+      try {
+        await loadMapImage();
+      } catch (error) {
+        setStatus(`地图图片加载失败：${error.message}`, true);
+        return;
+      }
+      const canvas = document.getElementById("compareMap");
+      if (!canvas) return;
+      canvas.width = state.mapImage.naturalWidth;
+      canvas.height = state.mapImage.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(state.mapImage, 0, 0, canvas.width, canvas.height);
+      const sx = canvas.width / 851;
+      const sy = canvas.height / 851;
+      const tags = state.comparison.source.teamTags || [];
+      const spots = state.comparison.spots || [];
+      for (const spot of spots) {
+        if (!spot.pixel) continue;
+        const x = spot.pixel.x * sx;
+        const y = spot.pixel.y * sy;
+        const r = Math.max(4, Math.min(18, 4 + Math.sqrt(spot.sampleCount || 1) * 2));
+        const idx = dominantTeamIndex(spot, tags);
+        const color = idx < 0 ? "rgba(150,160,175,0.7)" : teamColor(idx);
+        const isSelected = selectedSpotId === spot.spotId;
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = isSelected ? 22 : 10;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.82;
+        ctx.fill();
+        ctx.restore();
+        ctx.lineWidth = isSelected ? 4 : 1.5;
+        ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.85)";
+        ctx.stroke();
+      }
+      const tip = document.getElementById("compareTip");
+      const nearest = event => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (event.clientX - rect.left) * canvas.width / rect.width;
+        const y = (event.clientY - rect.top) * canvas.height / rect.height;
+        let best = null;
+        let bestD = Infinity;
+        for (const spot of spots) {
+          if (!spot.pixel) continue;
+          const d = Math.hypot(spot.pixel.x * sx - x, spot.pixel.y * sy - y);
+          if (d < bestD) { bestD = d; best = spot; }
+        }
+        return { best, bestD };
+      };
+      canvas.onmousemove = event => {
+        const { best, bestD } = nearest(event);
+        if (tip && best && bestD < 24) {
+          const rect = canvas.getBoundingClientRect();
+          tip.style.left = `${event.clientX - rect.left}px`;
+          tip.style.top = `${event.clientY - rect.top}px`;
+          tip.style.display = "block";
+          tip.innerHTML = `<div class="tip-title">${best.spotId}</div>
+            <div class="tip-row">${best.wardType} / ${best.team} · 总样本 ${best.sampleCount} · 均分 ${best.avgScore}</div>
+            ${tags.map(tag => `<div class="tip-row">${tag.toUpperCase()}: ${(best.byTeam[tag] || {}).placements || 0} 次</div>`).join("")}`;
+          canvas.style.cursor = "pointer";
+        } else if (tip) {
+          tip.style.display = "none";
+          canvas.style.cursor = "default";
+        }
+      };
+      canvas.onmouseleave = () => { if (tip) tip.style.display = "none"; canvas.style.cursor = "default"; };
+    }
+
     for (const button of document.querySelectorAll("[data-section]")) {
       button.addEventListener("click", () => showSection(button.dataset.section));
     }
@@ -1529,7 +2449,20 @@
     });
     el.timePreset.addEventListener("change", renderSearchOverview);
 
+    el.cmpAddTeam.addEventListener("click", addCmpTeam);
+    el.cmpCompute.addEventListener("click", computeComparison);
+    el.cmpClear.addEventListener("click", () => {
+      state.comparisonTeams = [];
+      state.comparison = null;
+      renderCmpChips();
+      renderComparison();
+    });
+    el.cmpTeamTag.addEventListener("keydown", event => {
+      if (event.key === "Enter") addCmpTeam();
+    });
+
     renderMatches();
+    renderCmpChips();
   </script>
 </body>
 </html>

@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import hashlib
+from collections import defaultdict
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -30,10 +31,11 @@ from compute_ward_hero_visibility import (  # noqa: E402
 import compute_ward_value_metrics as ward_value  # noqa: E402
 
 
-DEFAULT_DB = os.environ.get("DOTA_DB_DATABASE", "dota2_stats")
+DEFAULT_DB = os.environ.get("DOTA_DB_DATABASE", "dota2_analysis")
 DEFAULT_OVERVIEW_DB = os.environ.get("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
 CACHE_VERSION = "ward-hero-visibility-v8"
 WARD_VALUE_CACHE_VERSION = "ward-value-v1"
+COMPARISON_CACHE_VERSION = "team-comparison-v1"
 CACHE_ROOT = PROJECT_ROOT / "outputs" / "web_cache"
 
 
@@ -49,6 +51,19 @@ class VisibilityRequest(BaseModel):
 class WardValueRequest(BaseModel):
     teamTag: str = Field(min_length=1)
     matchIds: list[int] = Field(min_length=1)
+    start: int | None = None
+    end: int | None = None
+    forceRefresh: bool = False
+    clusterEps: float = Field(default=200.0, gt=0)
+
+
+class ComparisonTeam(BaseModel):
+    teamTag: str = Field(min_length=1)
+    matchIds: list[int] = Field(min_length=1)
+
+
+class TeamComparisonRequest(BaseModel):
+    teams: list[ComparisonTeam] = Field(min_length=2, max_length=6)
     start: int | None = None
     end: int | None = None
     forceRefresh: bool = False
@@ -473,6 +488,287 @@ def cached_ward_value_report(payload: WardValueRequest) -> dict:
     return report
 
 
+def comparison_args(payload: TeamComparisonRequest) -> SimpleNamespace:
+    return SimpleNamespace(
+        database=DEFAULT_DB,
+        grid=str(RESOURCE_ROOT / "native-fow" / "dota_static_fow_grid.json"),
+        cache=str(RESOURCE_ROOT / "native-fow" / "cache.fow"),
+        tree_points=str(RESOURCE_ROOT / "source" / "dota-map-trees.csv"),
+        map=str(RESOURCE_ROOT / "maps" / "7.41_map.png"),
+        projection_calibration=str(RESOURCE_ROOT / "calibration" / "projection_741_aerial_14pt.json"),
+        start=payload.start,
+        end=payload.end,
+        cluster_eps=payload.clusterEps,
+    )
+
+
+def comparison_cache_input(payload: TeamComparisonRequest) -> dict:
+    return {
+        "version": COMPARISON_CACHE_VERSION,
+        "database": DEFAULT_DB,
+        "teams": [
+            {
+                "teamTag": team.teamTag.strip().lower(),
+                "matchIds": sorted(int(match_id) for match_id in team.matchIds),
+            }
+            for team in payload.teams
+        ],
+        "start": payload.start,
+        "end": payload.end,
+        "clusterEps": payload.clusterEps,
+    }
+
+
+def comparison_cache_key(payload: TeamComparisonRequest) -> str:
+    raw = json.dumps(comparison_cache_input(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def comparison_cache_path_for(payload: TeamComparisonRequest) -> Path:
+    return CACHE_ROOT / f"team_comparison_{comparison_cache_key(payload)}.json"
+
+
+def comparison_cache_meta(payload: TeamComparisonRequest, hit: bool, path: Path) -> dict:
+    return {
+        "hit": hit,
+        "key": comparison_cache_key(payload),
+        "path": project_path(path),
+        "version": COMPARISON_CACHE_VERSION,
+    }
+
+
+def read_cached_comparison_report(payload: TeamComparisonRequest) -> dict | None:
+    path = comparison_cache_path_for(payload)
+    if not path.exists():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["cache"] = {
+        **comparison_cache_meta(payload, True, path),
+        "computedAt": report.get("cache", {}).get("computedAt"),
+    }
+    return report
+
+
+def write_cached_comparison_report(payload: TeamComparisonRequest, report: dict) -> None:
+    path = comparison_cache_path_for(payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report["cache"] = {
+        **comparison_cache_meta(payload, False, path),
+        "computedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    temp_path = path.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _safe_div(numerator: float, denominator: float) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
+def _team_summary(team_tag: str, instances: list[dict], spot_ids: set[str]) -> dict:
+    observers = [item for item in instances if item["wardType"] == "obs"]
+    sentries = [item for item in instances if item["wardType"] == "sen"]
+    deward_known = [item for item in instances if item.get("dewarded") is not None]
+    count = len(instances)
+    return {
+        "teamTag": team_tag,
+        "instanceCount": count,
+        "observerCount": len(observers),
+        "sentryCount": len(sentries),
+        "spotCount": len(spot_ids),
+        "avgValueScore": round(_safe_div(sum(item["valueScore"] for item in instances), count), 2),
+        "avgSeenSeconds": round(_safe_div(sum(item["enemyHeroSeenSeconds"] for item in instances), count), 2),
+        "avgLifetimeSeconds": round(_safe_div(sum(item["lifetimeSeconds"] for item in instances), count), 2),
+        "avgTrueSightSeconds": round(
+            _safe_div(sum(item["invisibleHeroTrueSightSeconds"] for item in sentries), len(sentries)), 2
+        ),
+        "dewardRate": (
+            round(_safe_div(sum(1 for item in deward_known if item["dewarded"]), len(deward_known)), 4)
+            if deward_known
+            else None
+        ),
+    }
+
+
+def team_comparison_report(payload: TeamComparisonRequest) -> dict:
+    grid, cache = grid_and_cache()
+    tree_id_cells = ward_value_tree_cells()
+    args = comparison_args(payload)
+    team_tags = [team.teamTag for team in payload.teams]
+    focus_tag = team_tags[0]
+
+    match_cache: dict[int, dict] = {}
+    all_instances: list[dict] = []
+    invis_flags: list[bool] = []
+    per_team_counts: dict[str, int] = {tag: 0 for tag in team_tags}
+    team_match_ids: dict[str, list[int]] = {}
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            for team in payload.teams:
+                team_match_ids[team.teamTag] = [int(match_id) for match_id in team.matchIds]
+                for match_id in team.matchIds:
+                    key = int(match_id)
+                    if key not in match_cache:
+                        match_cache[key] = ward_value.compute_match(
+                            cursor, key, args, grid, cache, tree_id_cells
+                        )
+                    match = match_cache[key]
+                    side = resolve_team_side(match["matchInfo"], team.teamTag)
+                    invis_flags.append(bool(match["invisibility"]["available"]))
+                    for item in match["instances"]:
+                        if item.get("team") != side:
+                            continue
+                        clone = dict(item)
+                        clone["teamTag"] = team.teamTag
+                        clone["teamSide"] = side
+                        all_instances.append(clone)
+                        per_team_counts[team.teamTag] += 1
+
+    invisibility_available = all(invis_flags) if invis_flags else False
+    ward_value.score_instances(all_instances, invisibility_available)
+    instances = ward_value.finalize_instances(all_instances)
+    spots = ward_value.cluster_spots(instances, payload.clusterEps)
+    projection = ward_value.load_projection(Path(args.projection_calibration))
+    for spot in spots:
+        spot["pixel"] = ward_value.world_to_pixel(spot["centerWorldX"], spot["centerWorldY"], projection)
+
+    instances_by_spot: dict[str, list[dict]] = defaultdict(list)
+    for item in instances:
+        instances_by_spot[str(item.get("spotId"))].append(item)
+
+    team_spot_ids: dict[str, set[str]] = {tag: set() for tag in team_tags}
+    for item in instances:
+        team_spot_ids[item["teamTag"]].add(str(item.get("spotId")))
+
+    team_summaries = []
+    for tag in team_tags:
+        team_instances = [item for item in instances if item["teamTag"] == tag]
+        team_summaries.append(_team_summary(tag, team_instances, team_spot_ids[tag]))
+
+    spot_rows = []
+    for spot in spots:
+        members = instances_by_spot.get(spot["spotId"], [])
+        per_team = {}
+        for tag in team_tags:
+            team_members = [item for item in members if item["teamTag"] == tag]
+            deward_known = [item for item in team_members if item.get("dewarded") is not None]
+            per_team[tag] = {
+                "placements": len(team_members),
+                "usageRate": round(_safe_div(len(team_members), per_team_counts[tag]), 4),
+                "avgScore": round(
+                    _safe_div(sum(item["valueScore"] for item in team_members), len(team_members)), 2
+                )
+                if team_members
+                else None,
+                "avgSeenSeconds": round(
+                    _safe_div(sum(item["enemyHeroSeenSeconds"] for item in team_members), len(team_members)), 2
+                )
+                if team_members
+                else None,
+                "dewardRate": (
+                    round(_safe_div(sum(1 for item in deward_known if item["dewarded"]), len(deward_known)), 4)
+                    if deward_known
+                    else None
+                ),
+            }
+        usage_rates = [per_team[tag]["usageRate"] for tag in team_tags]
+        benchmark_usage = round(_safe_div(sum(usage_rates), len(usage_rates)), 4)
+        spot_rows.append(
+            {
+                "spotId": spot["spotId"],
+                "wardType": spot["wardType"],
+                "team": spot["team"],
+                "centerWorldX": spot["centerWorldX"],
+                "centerWorldY": spot["centerWorldY"],
+                "pixel": spot["pixel"],
+                "sampleCount": spot["sampleCount"],
+                "avgScore": spot["avgScore"],
+                "avgSeenSeconds": spot["avgSeenSeconds"],
+                "dewardRate": spot["dewardRate"],
+                "confidence": spot["confidence"],
+                "benchmarkUsageRate": benchmark_usage,
+                "byTeam": per_team,
+            }
+        )
+
+    focus_total = per_team_counts.get(focus_tag, 0)
+    other_tags = team_tags[1:]
+
+    def focus_usage(row: dict) -> float:
+        return row["byTeam"][focus_tag]["usageRate"]
+
+    def benchmark_usage_others(row: dict) -> float:
+        rates = [row["byTeam"][tag]["usageRate"] for tag in other_tags]
+        return _safe_div(sum(rates), len(rates))
+
+    signature_spots = []
+    overused_low_value = []
+    underused_high_value = []
+    for row in spot_rows:
+        focus_rate = focus_usage(row)
+        bench_rate = benchmark_usage_others(row)
+        diff = round(focus_rate - bench_rate, 4)
+        spot_score = row["avgScore"] or 0
+        entry = {
+            "spotId": row["spotId"],
+            "wardType": row["wardType"],
+            "team": row["team"],
+            "focusUsageRate": focus_rate,
+            "benchmarkUsageRate": round(bench_rate, 4),
+            "usageDiff": diff,
+            "avgScore": row["avgScore"],
+            "dewardRate": row["dewardRate"],
+            "sampleCount": row["sampleCount"],
+        }
+        if focus_rate > 0 and diff >= 0.03 and spot_score >= 55:
+            signature_spots.append(entry)
+        if focus_rate > 0 and diff >= 0.03 and spot_score < 45:
+            overused_low_value.append(entry)
+        if focus_rate <= bench_rate - 0.03 and spot_score >= 60:
+            underused_high_value.append(entry)
+
+    signature_spots.sort(key=lambda item: -item["usageDiff"])
+    overused_low_value.sort(key=lambda item: (item["avgScore"] or 0, -item["usageDiff"]))
+    underused_high_value.sort(key=lambda item: (-(item["avgScore"] or 0), item["usageDiff"]))
+
+    return {
+        "source": {
+            "database": DEFAULT_DB,
+            "focusTeam": focus_tag,
+            "teamTags": team_tags,
+            "teamMatchIds": team_match_ids,
+            "map": map_config(),
+            "mapVersion": ward_value.MAP_VERSION,
+            "clusterEpsWorld": payload.clusterEps,
+            "invisibilityDataAvailable": invisibility_available,
+        },
+        "summary": {
+            "teamCount": len(team_tags),
+            "instanceCount": len(instances),
+            "spotCount": len(spots),
+            "focusTeam": focus_tag,
+        },
+        "teams": team_summaries,
+        "spots": spot_rows,
+        "diagnostics": {
+            "signatureSpots": signature_spots[:20],
+            "overusedLowValueSpots": overused_low_value[:20],
+            "underusedHighValueSpots": underused_high_value[:20],
+        },
+    }
+
+
+def cached_team_comparison_report(payload: TeamComparisonRequest) -> dict:
+    if not payload.forceRefresh:
+        cached = read_cached_comparison_report(payload)
+        if cached is not None:
+            return cached
+    report = team_comparison_report(payload)
+    write_cached_comparison_report(payload, report)
+    return report
+
+
 app = FastAPI(title="Dota Ward Vision Query")
 
 
@@ -563,6 +859,16 @@ def compute_visibility(request: VisibilityRequest) -> dict:
 def compute_ward_value(request: WardValueRequest) -> dict:
     try:
         return cached_ward_value_report(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except pymysql.MySQLError as exc:
+        raise HTTPException(status_code=500, detail=f"database query failed: {exc}") from exc
+
+
+@app.post("/api/teams/ward-comparison")
+def compute_team_comparison(request: TeamComparisonRequest) -> dict:
+    try:
+        return cached_team_comparison_report(request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except pymysql.MySQLError as exc:

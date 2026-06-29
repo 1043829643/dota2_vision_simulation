@@ -1053,7 +1053,7 @@ def main() -> int:
         "--html-output",
         help="Optional HTML report path. Defaults to the JSON output path with .html suffix.",
     )
-    parser.add_argument("--database", default=os.environ.get("DOTA_DB_DATABASE", "dota2_stats"))
+    parser.add_argument("--database", default=os.environ.get("DOTA_DB_DATABASE", "dota2_analysis"))
     parser.add_argument("--overview-database", default=os.environ.get("DOTA_OVERVIEW_DATABASE", "dwd_dota2"))
     parser.add_argument("--db-host", default=os.environ.get("DOTA_DB_HOST", "127.0.0.1"))
     parser.add_argument("--db-port", type=int, default=int(os.environ.get("DOTA_DB_PORT", "9030")))

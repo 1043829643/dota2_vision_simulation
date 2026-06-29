@@ -1228,7 +1228,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Compute MVP1 ward value metrics and report.")
     parser.add_argument("--match-id", type=int, action="append", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--database", default=os.environ.get("DOTA_DB_DATABASE", "dota2_stats"))
+    parser.add_argument("--database", default=os.environ.get("DOTA_DB_DATABASE", "dota2_analysis"))
     parser.add_argument("--db-host", default=os.environ.get("DOTA_DB_HOST", "127.0.0.1"))
     parser.add_argument("--db-port", type=int, default=int(os.environ.get("DOTA_DB_PORT", "9030")))
     parser.add_argument("--db-user", default=os.environ.get("DOTA_DB_USER", ""))
