@@ -1324,7 +1324,6 @@
       if (!url) return null;
       if (state.heroImages.has(url)) return state.heroImages.get(url);
       const image = new Image();
-      image.crossOrigin = "anonymous";
       image.onload = () => onLoad?.();
       image.onerror = () => state.heroImages.set(url, null);
       state.heroImages.set(url, image);
