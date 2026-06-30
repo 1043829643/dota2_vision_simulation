@@ -3,8 +3,8 @@ requires = ["python-3.12"]
 
 [dev]
 build = ["python", "-m", "pip", "install", "-r", "requirements.txt"]
-run = ["bash", "${COZE_WORKSPACE_PATH}/scripts/start_server.sh"]
+run = ["bash", "/workspace/projects/start.sh"]
 
 [deploy]
 build = ["python", "-m", "pip", "install", "-r", "requirements.txt"]
-run = ["bash", "${COZE_WORKSPACE_PATH}/scripts/start_server.sh"]
+run = ["bash", "/workspace/projects/start.sh"]

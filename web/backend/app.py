@@ -775,13 +775,52 @@ app = FastAPI(title="Dota Ward Vision Query")
 @app.get("/api/health")
 def health() -> dict:
     cfg = db_config()
+    # 检查关键资源文件
+    critical_files = {
+        "cache_fow": RESOURCE_ROOT / "native-fow" / "cache.fow",
+        "fow_grid": RESOURCE_ROOT / "native-fow" / "dota_static_fow_grid.json",
+        "map": RESOURCE_ROOT / "maps" / "7.41_map.png",
+        "calibration": RESOURCE_ROOT / "calibration" / "projection_741_aerial_14pt.json",
+        "tree_csv": RESOURCE_ROOT / "source" / "dota-map-trees.csv",
+    }
+    files = {}
+    all_ok = True
+    for name, path in critical_files.items():
+        exists = path.exists()
+        size = path.stat().st_size if exists else 0
+        files[name] = {
+            "exists": exists,
+            "size": size,
+            "path": project_path(path),
+            "lfs_pointer": exists and size < 200 and size > 0,
+        }
+        if not exists:
+            all_ok = False
+    # 测试数据库连接
+    db_ok = False
+    db_error = None
+    if cfg["user"] and cfg["password"]:
+        try:
+            conn = connect()
+            conn.close()
+            db_ok = True
+        except Exception as e:
+            db_error = str(e)
     return {
-        "ok": True,
-        "database": cfg["database"],
-        "overviewDatabase": DEFAULT_OVERVIEW_DB,
-        "dbHost": cfg["host"],
-        "dbPort": cfg["port"],
-        "hasCredentials": bool(cfg["user"] and cfg["password"]),
+        "ok": all_ok and db_ok,
+        "env": {
+            "DOTA_DB_HOST": cfg["host"],
+            "DOTA_DB_PORT": cfg["port"],
+            "DOTA_DB_USER": cfg["user"],
+            "hasCredentials": bool(cfg["user"] and cfg["password"]),
+            "DOTA_DB_DATABASE": DEFAULT_DB,
+            "DOTA_OVERVIEW_DATABASE": DEFAULT_OVERVIEW_DB,
+        },
+        "resources": files,
+        "database": {
+            "ok": db_ok,
+            "error": db_error,
+        },
         "cacheRoot": project_path(CACHE_ROOT),
         "cacheVersion": CACHE_VERSION,
     }
