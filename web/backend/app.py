@@ -4,10 +4,13 @@ import json
 import os
 import sys
 import hashlib
+import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from types import SimpleNamespace
 
 import pymysql
@@ -60,6 +63,10 @@ WARD_VALUE_CACHE_VERSION = "ward-value-v1"
 COMPARISON_CACHE_VERSION = "team-comparison-v1"
 DEFAULT_CACHE_ROOT = "/tmp/dota_vision_web_cache" if os.environ.get("DEPLOY_RUN_PORT") else str(PROJECT_ROOT / "outputs" / "web_cache")
 CACHE_ROOT = Path(_env_or_config("DOTA_CACHE_ROOT", DEFAULT_CACHE_ROOT))
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=int(_env_or_config("DOTA_JOB_WORKERS", "2")))
+JOB_LOCK = Lock()
+JOBS: dict[str, dict] = {}
+MAX_JOBS = 100
 
 
 class VisibilityRequest(BaseModel):
@@ -120,6 +127,86 @@ def connect():
         )
     except pymysql.MySQLError as exc:
         raise HTTPException(status_code=500, detail=f"database connection failed: {exc}") from exc
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def public_job(job: dict) -> dict:
+    return {
+        "jobId": job["jobId"],
+        "kind": job["kind"],
+        "status": job["status"],
+        "createdAt": job["createdAt"],
+        "startedAt": job.get("startedAt"),
+        "finishedAt": job.get("finishedAt"),
+        "error": job.get("error"),
+    }
+
+
+def trim_jobs() -> None:
+    if len(JOBS) <= MAX_JOBS:
+        return
+    removable = sorted(
+        [job for job in JOBS.values() if job["status"] in {"succeeded", "failed"}],
+        key=lambda item: item.get("finishedAt") or item["createdAt"],
+    )
+    for job in removable[: max(0, len(JOBS) - MAX_JOBS)]:
+        JOBS.pop(job["jobId"], None)
+
+
+def run_job(job_id: str, runner, payload) -> None:
+    with JOB_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return
+        job["status"] = "running"
+        job["startedAt"] = utc_now_iso()
+    try:
+        result = runner(payload)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
+        with JOB_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["status"] = "failed"
+                job["error"] = detail
+                job["finishedAt"] = utc_now_iso()
+        return
+    except Exception as exc:
+        with JOB_LOCK:
+            job = JOBS.get(job_id)
+            if job:
+                job["status"] = "failed"
+                job["error"] = f"{type(exc).__name__}: {exc}"
+                job["finishedAt"] = utc_now_iso()
+        return
+    with JOB_LOCK:
+        job = JOBS.get(job_id)
+        if job:
+            job["status"] = "succeeded"
+            job["result"] = result
+            job["finishedAt"] = utc_now_iso()
+
+
+def create_job(kind: str, runner, payload) -> dict:
+    job_id = uuid.uuid4().hex
+    job = {
+        "jobId": job_id,
+        "kind": kind,
+        "status": "queued",
+        "createdAt": utc_now_iso(),
+        "startedAt": None,
+        "finishedAt": None,
+        "error": None,
+        "result": None,
+    }
+    with JOB_LOCK:
+        JOBS[job_id] = job
+        trim_jobs()
+    JOB_EXECUTOR.submit(run_job, job_id, runner, payload)
+    return public_job(job)
 
 
 @lru_cache(maxsize=1)
@@ -869,6 +956,43 @@ def health() -> dict:
         "cacheError": cache_error,
         "cacheVersion": CACHE_VERSION,
     }
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str) -> dict:
+    with JOB_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        return public_job(job)
+
+
+@app.get("/api/jobs/{job_id}/result")
+def get_job_result(job_id: str) -> dict:
+    with JOB_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] == "failed":
+            raise HTTPException(status_code=500, detail=job.get("error") or "job failed")
+        if job["status"] != "succeeded":
+            raise HTTPException(status_code=202, detail=f"job is {job['status']}")
+        return job["result"]
+
+
+@app.post("/api/visibility/jobs")
+def create_visibility_job(request: VisibilityRequest) -> dict:
+    return create_job("visibility", cached_visibility_report, request)
+
+
+@app.post("/api/ward-value/jobs")
+def create_ward_value_job(request: WardValueRequest) -> dict:
+    return create_job("ward-value", cached_ward_value_report, request)
+
+
+@app.post("/api/teams/ward-comparison/jobs")
+def create_team_comparison_job(request: TeamComparisonRequest) -> dict:
+    return create_job("team-comparison", cached_team_comparison_report, request)
 
 
 @app.get("/api/matches")

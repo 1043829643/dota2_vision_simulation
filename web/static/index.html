@@ -926,6 +926,33 @@
       return payload;
     }
 
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function runJob(path, requestBody, statusText) {
+      const job = await api(`${path}/jobs`, {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      });
+      const jobId = job.jobId;
+      const startedAt = Date.now();
+      let delay = 1200;
+      while (true) {
+        await sleep(delay);
+        const current = await api(`/api/jobs/${jobId}`);
+        const elapsed = Math.round((Date.now() - startedAt) / 1000);
+        if (current.status === "succeeded") {
+          return api(`/api/jobs/${jobId}/result`);
+        }
+        if (current.status === "failed") {
+          throw new Error(current.error || "后台任务失败。");
+        }
+        setStatus(`${statusText}（后台任务 ${current.status}，已等待 ${elapsed}s）`);
+        delay = Math.min(3000, Math.round(delay * 1.25));
+      }
+    }
+
     function showSection(id) {
       for (const section of document.querySelectorAll(".section")) {
         section.classList.toggle("active", section.id === id);
@@ -1965,17 +1992,14 @@
       setStatus(`正在计算 ${matchIds.length} 场比赛...`);
       el.compute.disabled = true;
       try {
-        const report = await api("/api/visibility", {
-          method: "POST",
-          body: JSON.stringify({
-            teamTag,
-            matchIds,
-            start: window.start,
-            end: window.end,
-            forceRefresh: el.forceRefresh.checked,
-            compareBothSides: el.compareBothSides.checked,
-          }),
-        });
+        const report = await runJob("/api/visibility", {
+          teamTag,
+          matchIds,
+          start: window.start,
+          end: window.end,
+          forceRefresh: el.forceRefresh.checked,
+          compareBothSides: el.compareBothSides.checked,
+        }, `正在计算 ${matchIds.length} 场比赛`);
         state.report = report;
         state.activeMatchId = (report.matches || [])[0]?.matchId || null;
         renderReportOverview();
@@ -2002,17 +2026,14 @@
       setStatus(`正在计算 ${matchIds.length} 场比赛的点位库...`);
       el.computeWardValue.disabled = true;
       try {
-        const report = await api("/api/ward-value", {
-          method: "POST",
-          body: JSON.stringify({
-            teamTag: el.teamTag.value.trim(),
-            matchIds,
-            start: window.start,
-            end: window.end,
-            forceRefresh: el.forceRefresh.checked,
-            clusterEps: 200,
-          }),
-        });
+        const report = await runJob("/api/ward-value", {
+          teamTag: el.teamTag.value.trim(),
+          matchIds,
+          start: window.start,
+          end: window.end,
+          forceRefresh: el.forceRefresh.checked,
+          clusterEps: 200,
+        }, `正在计算 ${matchIds.length} 场比赛的点位库`);
         state.wardValue = report;
         renderWardValue();
         showSection("roadmap");
@@ -2170,16 +2191,13 @@
       setStatus(`正在计算 ${state.comparisonTeams.length} 支战队的眼位对比...`);
       el.cmpCompute.disabled = true;
       try {
-        const report = await api("/api/teams/ward-comparison", {
-          method: "POST",
-          body: JSON.stringify({
-            teams: state.comparisonTeams.map(team => ({ teamTag: team.teamTag, matchIds: team.matchIds })),
-            start: window.start,
-            end: window.end,
-            forceRefresh: el.forceRefresh.checked,
-            clusterEps: 200,
-          }),
-        });
+        const report = await runJob("/api/teams/ward-comparison", {
+          teams: state.comparisonTeams.map(team => ({ teamTag: team.teamTag, matchIds: team.matchIds })),
+          start: window.start,
+          end: window.end,
+          forceRefresh: el.forceRefresh.checked,
+          clusterEps: 200,
+        }, `正在计算 ${state.comparisonTeams.length} 支战队的眼位对比`);
         state.comparison = report;
         renderComparison();
         showSection("compare");
