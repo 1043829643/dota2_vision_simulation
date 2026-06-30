@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pymysql
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -57,7 +58,8 @@ DEFAULT_OVERVIEW_DB = _env_or_config("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
 CACHE_VERSION = "ward-hero-visibility-v8"
 WARD_VALUE_CACHE_VERSION = "ward-value-v1"
 COMPARISON_CACHE_VERSION = "team-comparison-v1"
-CACHE_ROOT = PROJECT_ROOT / "outputs" / "web_cache"
+DEFAULT_CACHE_ROOT = "/tmp/dota_vision_web_cache" if os.environ.get("DEPLOY_RUN_PORT") else str(PROJECT_ROOT / "outputs" / "web_cache")
+CACHE_ROOT = Path(_env_or_config("DOTA_CACHE_ROOT", DEFAULT_CACHE_ROOT))
 
 
 class VisibilityRequest(BaseModel):
@@ -793,6 +795,16 @@ def cached_team_comparison_report(payload: TeamComparisonRequest) -> dict:
 app = FastAPI(title="Dota Ward Vision Query")
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"internal server error: {type(exc).__name__}: {exc}",
+        },
+    )
+
+
 @app.get("/api/health")
 def health() -> dict:
     cfg = db_config()
@@ -827,8 +839,18 @@ def health() -> dict:
             db_ok = True
         except Exception as e:
             db_error = str(e)
+    cache_writable = False
+    cache_error = None
+    try:
+        CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+        probe = CACHE_ROOT / ".write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        cache_writable = True
+    except Exception as e:
+        cache_error = str(e)
     return {
-        "ok": all_ok and db_ok,
+        "ok": all_ok and db_ok and cache_writable,
         "env": {
             "DOTA_DB_HOST": cfg["host"],
             "DOTA_DB_PORT": cfg["port"],
@@ -843,6 +865,8 @@ def health() -> dict:
             "error": db_error,
         },
         "cacheRoot": project_path(CACHE_ROOT),
+        "cacheWritable": cache_writable,
+        "cacheError": cache_error,
         "cacheVersion": CACHE_VERSION,
     }
 
