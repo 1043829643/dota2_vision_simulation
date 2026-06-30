@@ -24,3 +24,5 @@ Thumbs.db
 
 # Preview files
 .preview
+.cozeproj/reduction
+.codegraph
