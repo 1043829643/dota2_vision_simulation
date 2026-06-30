@@ -21,3 +21,6 @@ outputs/
 .vscode/
 Thumbs.db
 .DS_Store
+
+# Preview files
+.preview
