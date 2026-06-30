@@ -819,6 +819,7 @@
       timers: new Map(),
       filters: new Map(),
       charts: new Map(),
+      heroImages: new Map(),
       playSpeed: 1,
       comparisonTeams: [],
       comparison: null,
@@ -1312,6 +1313,56 @@
       return ward.visionCells || [];
     }
 
+    function heroPortraitUrl(heroName) {
+      const shortName = String(heroName || "").replace(/^npc_dota_hero_/, "");
+      if (!shortName) return "";
+      return `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${shortName}.png`;
+    }
+
+    function getHeroPortrait(heroName, onLoad) {
+      const url = heroPortraitUrl(heroName);
+      if (!url) return null;
+      if (state.heroImages.has(url)) return state.heroImages.get(url);
+      const image = new Image();
+      image.crossOrigin = "anonymous";
+      image.onload = () => onLoad?.();
+      image.onerror = () => state.heroImages.set(url, null);
+      state.heroImages.set(url, image);
+      image.src = url;
+      return image;
+    }
+
+    function drawHeroFallback(ctx, x, y, invisible) {
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = invisible ? "rgba(242,197,92,0.98)" : "rgba(240,100,100,0.98)";
+      ctx.fill();
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    function drawHeroPortrait(ctx, x, y, sighting, redraw) {
+      const image = getHeroPortrait(sighting.heroName, redraw);
+      const size = sighting.invisible ? 24 : 22;
+      const radius = size / 2;
+      if (!image || !image.complete || !image.naturalWidth) {
+        drawHeroFallback(ctx, x, y, sighting.invisible);
+        return;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(image, x - radius, y - radius, size, size);
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = sighting.invisible ? "rgba(242,197,92,0.98)" : "rgba(255,255,255,0.92)";
+      ctx.lineWidth = sighting.invisible ? 3 : 2;
+      ctx.stroke();
+    }
+
     function drawMap(match, t) {
       const canvas = document.querySelector(`[data-map-canvas="${match.matchId}"]`);
       if (!canvas || !state.mapImage) return;
@@ -1392,13 +1443,10 @@
           ctx.lineTo(hx, hy);
           ctx.stroke();
         }
-        ctx.beginPath();
-        ctx.arc(hx, hy, 6, 0, Math.PI * 2);
-        ctx.fillStyle = sighting.invisible ? "rgba(242,197,92,0.98)" : "rgba(240,100,100,0.98)";
-        ctx.fill();
-        ctx.strokeStyle = "white";
-        ctx.lineWidth = 1.4;
-        ctx.stroke();
+        drawHeroPortrait(ctx, hx, hy, sighting, () => {
+          const slider = document.querySelector(`[data-slider="${match.matchId}"]`);
+          if (slider && Number(slider.value) === t) drawMap(match, t);
+        });
       }
 
       const clock = document.querySelector(`[data-clock="${match.matchId}"]`);
@@ -1471,8 +1519,8 @@
             <div class="legend">
               <span><span class="dot" style="background:var(--green)"></span>Observer</span>
               <span><span class="dot" style="background:var(--blue)"></span>Sentry 真视范围</span>
-              <span><span class="dot" style="background:var(--red)"></span>可见敌方英雄</span>
-              <span><span class="dot" style="background:var(--gold)"></span>隐身敌方英雄</span>
+              <span><span class="dot" style="background:var(--red)"></span>敌方英雄头像</span>
+              <span><span class="dot" style="background:var(--gold)"></span>金边=隐身敌方英雄</span>
             </div>
           </article>
           <aside class="side-panel">
