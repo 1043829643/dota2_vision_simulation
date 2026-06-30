@@ -142,6 +142,7 @@ def public_job(job: dict) -> dict:
         "startedAt": job.get("startedAt"),
         "finishedAt": job.get("finishedAt"),
         "error": job.get("error"),
+        "progress": job.get("progress"),
     }
 
 
@@ -156,6 +157,17 @@ def trim_jobs() -> None:
         JOBS.pop(job["jobId"], None)
 
 
+def set_job_progress(job_id: str, progress: dict) -> None:
+    with JOB_LOCK:
+        job = JOBS.get(job_id)
+        if job:
+            job["progress"] = {
+                **(job.get("progress") or {}),
+                **progress,
+                "updatedAt": utc_now_iso(),
+            }
+
+
 def run_job(job_id: str, runner, payload) -> None:
     with JOB_LOCK:
         job = JOBS.get(job_id)
@@ -163,8 +175,9 @@ def run_job(job_id: str, runner, payload) -> None:
             return
         job["status"] = "running"
         job["startedAt"] = utc_now_iso()
+        job["progress"] = {"phase": "starting", "message": "任务启动中", "updatedAt": job["startedAt"]}
     try:
-        result = runner(payload)
+        result = runner(payload, lambda progress: set_job_progress(job_id, progress))
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
         with JOB_LOCK:
@@ -201,6 +214,7 @@ def create_job(kind: str, runner, payload) -> dict:
         "finishedAt": None,
         "error": None,
         "result": None,
+        "progress": {"phase": "queued", "message": "等待执行", "updatedAt": utc_now_iso()},
     }
     with JOB_LOCK:
         JOBS[job_id] = job
@@ -429,18 +443,51 @@ def ward_value_args(payload: WardValueRequest) -> SimpleNamespace:
     )
 
 
-def ward_value_report(payload: WardValueRequest) -> dict:
+def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
     grid, cache = grid_and_cache()
     tree_id_cells = ward_value_tree_cells()
     args = ward_value_args(payload)
     matches = []
     all_instances = []
+    total_matches = len(payload.matchIds)
     with connect() as conn:
         with conn.cursor() as cursor:
-            for match_id in payload.matchIds:
+            for match_index, match_id in enumerate(payload.matchIds):
                 match_info = ward_value.load_match_info(cursor, int(match_id))
                 team_side = resolve_team_side(match_info, payload.teamTag)
-                match_args = SimpleNamespace(**vars(args), team_side_filter=team_side)
+                if progress:
+                    progress({
+                        "phase": "match",
+                        "message": f"正在计算第 {match_index + 1}/{total_matches} 场比赛",
+                        "currentMatch": match_index + 1,
+                        "totalMatches": total_matches,
+                        "matchId": int(match_id),
+                    })
+
+                def match_progress(_match_id: int, second: int, start: int, end: int, *, index=match_index) -> None:
+                    if not progress:
+                        return
+                    match_total = max(1, end - start + 1)
+                    match_done = max(0, min(match_total, second - start + 1))
+                    percent = round(((index + match_done / match_total) / max(1, total_matches)) * 100, 1)
+                    progress({
+                        "phase": "match",
+                        "message": f"第 {index + 1}/{total_matches} 场，时间 {second}/{end}",
+                        "currentMatch": index + 1,
+                        "totalMatches": total_matches,
+                        "matchId": int(_match_id),
+                        "second": second,
+                        "start": start,
+                        "end": end,
+                        "percent": percent,
+                    })
+
+                match_args = SimpleNamespace(
+                    **vars(args),
+                    team_side_filter=team_side,
+                    progress_callback=match_progress,
+                    progress_step=15,
+                )
                 match = ward_value.compute_match(cursor, int(match_id), match_args, grid, cache, tree_id_cells)
                 filtered_instances = [
                     item for item in match["instances"]
@@ -458,6 +505,8 @@ def ward_value_report(payload: WardValueRequest) -> dict:
                 all_instances.extend(filtered_instances)
 
     invisibility_available = all(match["invisibility"]["available"] for match in matches) if matches else False
+    if progress:
+        progress({"phase": "scoring", "message": "正在评分和聚类点位", "percent": 96})
     ward_value.score_instances(all_instances, invisibility_available)
     instances = ward_value.finalize_instances(all_instances)
     spots = ward_value.cluster_spots(instances, payload.clusterEps)
@@ -468,6 +517,8 @@ def ward_value_report(payload: WardValueRequest) -> dict:
     leaderboards = ward_value.build_leaderboards(compact_instances, spots)
     spot_details = ward_value.build_spot_details(spots, instances)
     spot_leaderboards = build_spot_leaderboards(spot_details)
+    if progress:
+        progress({"phase": "finished", "message": "点位库计算完成", "percent": 100})
     return {
         "source": {
             "database": DEFAULT_DB,
@@ -590,13 +641,33 @@ def cached_visibility_report(payload: VisibilityRequest) -> dict:
     return report
 
 
-def cached_ward_value_report(payload: WardValueRequest) -> dict:
+def cached_ward_value_report(payload: WardValueRequest, progress=None) -> dict:
     if not payload.forceRefresh:
         cached = read_cached_ward_value_report(payload)
         if cached is not None:
+            if progress:
+                progress({"phase": "cache", "message": "已命中缓存", "percent": 100})
             return cached
-    report = ward_value_report(payload)
+    report = ward_value_report(payload, progress)
     write_cached_ward_value_report(payload, report)
+    return report
+
+
+def visibility_job_runner(payload: VisibilityRequest, progress) -> dict:
+    progress({"phase": "computing", "message": "正在计算单场时间轴"})
+    report = cached_visibility_report(payload)
+    progress({"phase": "finished", "message": "单场时间轴计算完成", "percent": 100})
+    return report
+
+
+def ward_value_job_runner(payload: WardValueRequest, progress) -> dict:
+    return cached_ward_value_report(payload, progress)
+
+
+def comparison_job_runner(payload: TeamComparisonRequest, progress) -> dict:
+    progress({"phase": "computing", "message": "正在计算战队眼位对比"})
+    report = cached_team_comparison_report(payload)
+    progress({"phase": "finished", "message": "战队眼位对比计算完成", "percent": 100})
     return report
 
 
@@ -984,17 +1055,17 @@ def get_job_result(job_id: str) -> dict:
 
 @app.post("/api/visibility/jobs")
 def create_visibility_job(request: VisibilityRequest) -> dict:
-    return create_job("visibility", cached_visibility_report, request)
+    return create_job("visibility", visibility_job_runner, request)
 
 
 @app.post("/api/ward-value/jobs")
 def create_ward_value_job(request: WardValueRequest) -> dict:
-    return create_job("ward-value", cached_ward_value_report, request)
+    return create_job("ward-value", ward_value_job_runner, request)
 
 
 @app.post("/api/teams/ward-comparison/jobs")
 def create_team_comparison_job(request: TeamComparisonRequest) -> dict:
-    return create_job("team-comparison", cached_team_comparison_report, request)
+    return create_job("team-comparison", comparison_job_runner, request)
 
 
 @app.get("/api/matches")

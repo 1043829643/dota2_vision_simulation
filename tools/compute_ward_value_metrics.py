@@ -236,7 +236,7 @@ ORDER BY time,log_index
     return intervals
 
 
-def load_positions(cursor, match_id: int, start: int, end: int, players: dict[int, dict]) -> dict[int, list[dict]]:
+def load_positions(cursor, match_id: int, start: int, end: int, players: dict[int, dict], team_filter: str | None = None) -> dict[int, list[dict]]:
     rows = fetch_all(
         cursor,
         """
@@ -256,6 +256,8 @@ ORDER BY time,slot,log_index
     for row in rows:
         key = (int(row["time"]), int(row["slot"]))
         if key in seen or key[1] not in players:
+            continue
+        if team_filter in {"radiant", "dire"} and players[key[1]]["team"] != team_filter:
             continue
         seen.add(key)
         world_x, world_y = parser_to_world(float(row["x"]), float(row["y"]))
@@ -376,6 +378,27 @@ def active_wards(wards: list[dict], second: int, team: str | None = None, ward_t
     ]
 
 
+def active_ward_indexes(wards: list[dict], start: int, end: int) -> tuple[dict[int, list[dict]], dict[str, dict[int, list[dict]]]]:
+    obs_by_second: dict[int, list[dict]] = defaultdict(list)
+    sentries_by_team_by_second: dict[str, dict[int, list[dict]]] = {
+        "radiant": defaultdict(list),
+        "dire": defaultdict(list),
+    }
+    for ward in wards:
+        active_start = max(start, int(ward["start"]))
+        active_end = min(end + 1, int(ward["end"]))
+        if active_start >= active_end:
+            continue
+        target = (
+            obs_by_second
+            if ward["wardType"] == "obs"
+            else sentries_by_team_by_second[ward["team"]]
+        )
+        for second in range(active_start, active_end):
+            target[second].append(ward)
+    return obs_by_second, sentries_by_team_by_second
+
+
 def sentry_covers(sentries: list[dict], world_x: float, world_y: float) -> bool:
     radius_sq = SENTRY_RADIUS * SENTRY_RADIUS
     for sentry in sentries:
@@ -468,13 +491,13 @@ def compute_match(cursor, match_id: int, args, base_grid: VisibilityGrid, cache:
     team_side_filter = getattr(args, "team_side_filter", None)
     if team_side_filter in {"radiant", "dire"}:
         wards = [ward for ward in wards if ward["team"] == team_side_filter]
-    positions_by_second = load_positions(cursor, match_id, start, end, players)
+    enemy_position_filter = enemy_side(team_side_filter) if team_side_filter in {"radiant", "dire"} else None
+    positions_by_second = load_positions(cursor, match_id, start, end, players, enemy_position_filter)
     invisible_seconds, invis_meta = load_invisible_seconds(cursor, match_id, start, end, players)
     tree_events, rejected_tree_events, rejected_summary = load_tree_events(cursor, match_id, grid, tree_id_cells)
 
     states = {int(ward["ehandle"]): new_metric_state(ward, grid) for ward in wards}
-    obs_wards = [ward for ward in wards if ward["wardType"] == "obs"]
-    sentry_wards = [ward for ward in wards if ward["wardType"] == "sen"]
+    obs_by_second, sentries_by_team_by_second = active_ward_indexes(wards, start, end)
     events_by_second: dict[int, list[dict]] = defaultdict(list)
     for event in tree_events:
         events_by_second[int(event["second"])].append(event)
@@ -482,17 +505,21 @@ def compute_match(cursor, match_id: int, args, base_grid: VisibilityGrid, cache:
     tree_events_applied_window = 0
     vision_cache: dict[tuple[int, int], tuple[set[tuple[int, int]], dict]] = {}
     team_visible_slots_previous = {"radiant": set(), "dire": set()}
+    progress_callback = getattr(args, "progress_callback", None)
+    progress_step = max(1, int(getattr(args, "progress_step", 30) or 30))
 
     for second in range(start, end + 1):
+        if progress_callback and (second == start or second == end or (second - start) % progress_step == 0):
+            progress_callback(match_id, second, start, end)
         for event in events_by_second.get(second, []):
             if grid.set_tree_alive(event["cell"][0], event["cell"][1], bool(event["alive"])):
                 state_version += 1
             tree_events_applied_window += 1
 
-        active_obs = active_wards(obs_wards, second)
+        active_obs = obs_by_second.get(second, [])
         active_sentries_by_team = {
-            "radiant": active_wards(sentry_wards, second, "radiant", "sen"),
-            "dire": active_wards(sentry_wards, second, "dire", "sen"),
+            "radiant": sentries_by_team_by_second["radiant"].get(second, []),
+            "dire": sentries_by_team_by_second["dire"].get(second, []),
         }
         obs_cells_by_handle: dict[int, set[tuple[int, int]]] = {}
         obs_stats_by_handle: dict[int, dict] = {}

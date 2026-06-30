@@ -948,7 +948,10 @@
         if (current.status === "failed") {
           throw new Error(current.error || "后台任务失败。");
         }
-        setStatus(`${statusText}（后台任务 ${current.status}，已等待 ${elapsed}s）`);
+        const progress = current.progress || {};
+        const percent = Number.isFinite(Number(progress.percent)) ? ` · ${progress.percent}%` : "";
+        const message = progress.message ? ` · ${progress.message}` : "";
+        setStatus(`${statusText}（后台任务 ${current.status}${percent}${message}，已等待 ${elapsed}s）`);
         delay = Math.min(3000, Math.round(delay * 1.25));
       }
     }
