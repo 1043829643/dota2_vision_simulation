@@ -438,8 +438,10 @@ def ward_value_report(payload: WardValueRequest) -> dict:
     with connect() as conn:
         with conn.cursor() as cursor:
             for match_id in payload.matchIds:
-                match = ward_value.compute_match(cursor, int(match_id), args, grid, cache, tree_id_cells)
-                team_side = resolve_team_side(match["matchInfo"], payload.teamTag)
+                match_info = ward_value.load_match_info(cursor, int(match_id))
+                team_side = resolve_team_side(match_info, payload.teamTag)
+                match_args = SimpleNamespace(**vars(args), team_side_filter=team_side)
+                match = ward_value.compute_match(cursor, int(match_id), match_args, grid, cache, tree_id_cells)
                 filtered_instances = [
                     item for item in match["instances"]
                     if item.get("team") == team_side

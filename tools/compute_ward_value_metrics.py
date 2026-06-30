@@ -465,6 +465,9 @@ def compute_match(cursor, match_id: int, args, base_grid: VisibilityGrid, cache:
     start = max(0, args.start if args.start is not None else pos_start)
     end = args.end if args.end is not None else pos_end
     wards = load_ward_intervals(cursor, match_id, players, end)
+    team_side_filter = getattr(args, "team_side_filter", None)
+    if team_side_filter in {"radiant", "dire"}:
+        wards = [ward for ward in wards if ward["team"] == team_side_filter]
     positions_by_second = load_positions(cursor, match_id, start, end, players)
     invisible_seconds, invis_meta = load_invisible_seconds(cursor, match_id, start, end, players)
     tree_events, rejected_tree_events, rejected_summary = load_tree_events(cursor, match_id, grid, tree_id_cells)
