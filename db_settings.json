@@ -1,0 +1,8 @@
+{
+  "DOTA_DB_HOST": "47.86.96.51",
+  "DOTA_DB_PORT": 9030,
+  "DOTA_DB_USER": "dota2_reader",
+  "DOTA_DB_PASSWORD": "readerDota.",
+  "DOTA_DB_DATABASE": "dota2_analysis",
+  "DOTA_OVERVIEW_DATABASE": "dwd_dota2"
+}

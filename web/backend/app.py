@@ -31,8 +31,29 @@ from compute_ward_hero_visibility import (  # noqa: E402
 import compute_ward_value_metrics as ward_value  # noqa: E402
 
 
-DEFAULT_DB = os.environ.get("DOTA_DB_DATABASE", "dota2_analysis")
-DEFAULT_OVERVIEW_DB = os.environ.get("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
+# 从 db_settings.json 加载默认数据库配置（当环境变量未设置时使用）
+_DB_SETTINGS_FILE = Path(__file__).resolve().parents[2] / "db_settings.json"
+_db_settings: dict = {}
+if _DB_SETTINGS_FILE.exists():
+    try:
+        _db_settings = json.loads(_DB_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        _db_settings = {}
+
+
+def _env_or_config(key: str, default: str = "") -> str:
+    """优先读环境变量，再读 db_settings.json，最后用默认值"""
+    val = os.environ.get(key)
+    if val:
+        return val
+    val = _db_settings.get(key)
+    if val:
+        return str(val)
+    return default
+
+
+DEFAULT_DB = _env_or_config("DOTA_DB_DATABASE", "dota2_analysis")
+DEFAULT_OVERVIEW_DB = _env_or_config("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
 CACHE_VERSION = "ward-hero-visibility-v8"
 WARD_VALUE_CACHE_VERSION = "ward-value-v1"
 COMPARISON_CACHE_VERSION = "team-comparison-v1"
@@ -72,10 +93,10 @@ class TeamComparisonRequest(BaseModel):
 
 def db_config() -> dict:
     return {
-        "host": os.environ.get("DOTA_DB_HOST", "127.0.0.1"),
-        "port": int(os.environ.get("DOTA_DB_PORT", "9030")),
-        "user": os.environ.get("DOTA_DB_USER", ""),
-        "password": os.environ.get("DOTA_DB_PASSWORD", os.environ.get("DB_PASS", "")),
+        "host": _env_or_config("DOTA_DB_HOST", "127.0.0.1"),
+        "port": int(_env_or_config("DOTA_DB_PORT", "9030")),
+        "user": _env_or_config("DOTA_DB_USER", ""),
+        "password": _env_or_config("DOTA_DB_PASSWORD", os.environ.get("DB_PASS", "")),
         "database": DEFAULT_DB,
     }
 
