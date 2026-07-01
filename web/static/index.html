@@ -272,6 +272,25 @@
     }
     .team-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .team-logo.lg { width: 30px; height: 30px; font-size: 11px; border-radius: 7px; }
+    .team-suggest-wrap { position: relative; }
+    .team-suggest {
+      position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 4px);
+      max-height: 320px; overflow-y: auto;
+      background: var(--surface-2, #10151d); border: 1px solid var(--line, #26303c);
+      border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+      display: none;
+    }
+    .team-suggest.open { display: block; }
+    .team-suggest .ts-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 8px 11px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .team-suggest .ts-item:last-child { border-bottom: none; }
+    .team-suggest .ts-item:hover, .team-suggest .ts-item.active { background: rgba(88,183,255,0.12); }
+    .team-suggest .ts-name { font-weight: 600; font-size: 13px; }
+    .team-suggest .ts-meta { color: #7d8da0; font-size: 11px; margin-left: auto; white-space: nowrap; }
+    .team-suggest .ts-tag { color: #8497ab; font-size: 11px; }
+    .team-suggest .ts-empty { padding: 10px 12px; color: #7d8da0; font-size: 12px; }
     .metric {
       position: relative;
       overflow: hidden;
@@ -703,7 +722,7 @@
       <div class="search-grid">
         <div>
           <label for="teamTag">战队 Tag</label>
-          <input id="teamTag" value="KRD" placeholder="例如 KRD / AMG" />
+          <input id="teamTag" value="KRD" placeholder="搜战队名或 Tag，如 Yandex" />
         </div>
         <div>
           <label for="limit">最近比赛数</label>
@@ -738,7 +757,7 @@
         <label class="check"><input id="compareBothSides" type="checkbox" /> 同时计算双方</label>
         <label class="check"><input id="forceRefresh" type="checkbox" /> 强制重算</label>
         <div class="actions">
-          <button id="selectRecent" disabled>选择最近 N 场</button>
+          <button id="selectRecent" disabled>每侧最近 N 场</button>
           <input id="recentCount" style="width:82px" type="number" min="1" value="5" />
           <button id="selectAll" disabled>全选</button>
           <button id="clearAll" disabled>清空</button>
@@ -808,16 +827,16 @@
         <div class="toolbar">
           <div>
             <h2>多战队眼位对比</h2>
-            <div class="subtitle">添加 2-6 支战队，每队自动取最近 N 场比赛。所有战队的眼位会放进同一次聚类，从而在“同一个点位”上横向比较使用率、价值分与被排率。第一支战队作为分析对象，其余作为对比基准。</div>
+            <div class="subtitle">添加 2-6 支战队，每队自动取“最近 N 场天辉 + 最近 N 场夜魇”。所有战队的眼位会放进同一次聚类，从而在“同一个点位”上横向比较使用率、价值分与被排率。第一支战队作为分析对象，其余作为对比基准。可用上方阵营切换分别看天辉/夜魇。</div>
           </div>
         </div>
         <div class="quick-row" style="margin-top:14px;border-top:none;padding-top:0">
           <div style="min-width:180px">
             <label for="cmpTeamTag">战队 Tag</label>
-            <input id="cmpTeamTag" placeholder="例如 KRD" />
+            <input id="cmpTeamTag" placeholder="搜战队名或 Tag" />
           </div>
           <div style="width:140px">
-            <label for="cmpRecent">最近场数</label>
+            <label for="cmpRecent">每侧最近场数</label>
             <input id="cmpRecent" type="number" min="1" max="50" value="10" />
           </div>
           <div class="actions" style="align-self:end">
@@ -836,26 +855,31 @@
         <div class="toolbar">
           <div>
             <h2>预热计算</h2>
-            <div class="subtitle">提前指定几支战队，后台一次性把每支战队的“点位库与排行榜”和这批战队的“多战队眼位对比”都算好并写入缓存。之后在对应页面用相同战队与场数打开时会直接命中缓存、秒开。使用顶部的时间段设置。</div>
+            <div class="subtitle">先搜索并添加战队（确认能查到比赛后再加入列表），然后一次性把每支战队的“点位库与排行榜”和这批战队的“多战队眼位对比”都算好写入缓存。之后在对应页面用相同战队与场数打开会直接命中缓存、秒开。使用顶部的时间段设置。</div>
           </div>
         </div>
         <div class="quick-row" style="margin-top:14px;border-top:none;padding-top:0">
-          <div style="min-width:260px;flex:1">
-            <label for="pwTeams">战队 Tag（逗号或空格分隔，2-12 支）</label>
-            <input id="pwTeams" placeholder="例如 KRD, Tundra, Spirit" />
+          <div style="min-width:200px">
+            <label for="pwTeamTag">战队 Tag</label>
+            <input id="pwTeamTag" placeholder="搜战队名或 Tag" />
           </div>
           <div style="width:140px">
             <label for="pwRecent">每队最近场数</label>
             <input id="pwRecent" type="number" min="1" max="50" value="10" />
           </div>
           <div class="actions" style="align-self:end">
-            <button id="pwRun" class="primary">开始预热</button>
+            <button id="pwSearchAdd" class="primary">搜索并添加</button>
           </div>
         </div>
+        <div id="pwTeamChips" class="pill-row" style="margin-top:12px"></div>
         <div class="pill-row" style="margin-top:10px">
           <label class="muted"><input type="checkbox" id="pwIncludeWardValue" checked /> 点位库</label>
           <label class="muted"><input type="checkbox" id="pwIncludeComparison" checked /> 多战队对比</label>
           <label class="muted"><input type="checkbox" id="pwForceRefresh" /> 强制重算（忽略已有缓存）</label>
+        </div>
+        <div class="actions" style="margin-top:12px">
+          <button id="pwRun" disabled>开始预热</button>
+          <button id="pwClear" class="ghost">清空</button>
         </div>
       </div>
       <div id="prewarmContent" class="empty" style="margin-top:14px">填入战队 Tag，点击“开始预热”。预热完成后可从结果卡片一键打开对应的点位库或对比。</div>
@@ -879,8 +903,13 @@
       comparisonTeams: [],
       comparison: null,
       prewarm: null,
+      prewarmTeams: [],
       teamLogos: new Map(),
+      wardValueSide: "all",
+      comparisonSide: "all",
     };
+
+    const SIDE_LABEL = { all: "全部", radiant: "天辉", dire: "夜魇" };
 
     const TEAM_PALETTE = ["#58b7ff", "#f4c95c", "#4cd08a", "#b79cff", "#f26a6a", "#2bd6e6"];
     function teamColor(index) {
@@ -962,9 +991,12 @@
       cmpClear: document.getElementById("cmpClear"),
       cmpTeamChips: document.getElementById("cmpTeamChips"),
       compareContent: document.getElementById("compareContent"),
-      pwTeams: document.getElementById("pwTeams"),
+      pwTeamTag: document.getElementById("pwTeamTag"),
       pwRecent: document.getElementById("pwRecent"),
+      pwSearchAdd: document.getElementById("pwSearchAdd"),
+      pwTeamChips: document.getElementById("pwTeamChips"),
       pwRun: document.getElementById("pwRun"),
+      pwClear: document.getElementById("pwClear"),
       pwIncludeWardValue: document.getElementById("pwIncludeWardValue"),
       pwIncludeComparison: document.getElementById("pwIncludeComparison"),
       pwForceRefresh: document.getElementById("pwForceRefresh"),
@@ -1036,6 +1068,95 @@
           if (info.name) node.title = info.name;
         }
       }
+    }
+
+    function attachTeamSearch(input, onSelect) {
+      if (!input) return;
+      const wrap = document.createElement("span");
+      wrap.className = "team-suggest-wrap";
+      wrap.style.display = "block";
+      input.parentNode.insertBefore(wrap, input);
+      wrap.appendChild(input);
+      const box = document.createElement("div");
+      box.className = "team-suggest";
+      wrap.appendChild(box);
+
+      let items = [];
+      let active = -1;
+      let seq = 0;
+      let timer = null;
+
+      const close = () => { box.classList.remove("open"); active = -1; };
+      const render = () => {
+        if (!items.length) {
+          box.innerHTML = `<div class="ts-empty">没有匹配的战队</div>`;
+          box.classList.add("open");
+          return;
+        }
+        box.innerHTML = items.map((t, i) => {
+          const name = (t.name && t.name !== t.teamTag) ? t.name : (t.teamTag || "");
+          const tagLine = t.teamTag ? `<span class="ts-tag">${t.teamTag}</span>` : "";
+          return `<div class="ts-item ${i === active ? "active" : ""}" data-idx="${i}">
+            ${teamLogoHtml(t.teamTag)}
+            <span><span class="ts-name">${name}</span> ${tagLine}</span>
+            <span class="ts-meta">${t.matchCount || 0} 场</span>
+          </div>`;
+        }).join("");
+        box.classList.add("open");
+        hydrateTeamLogos();
+        for (const node of box.querySelectorAll(".ts-item")) {
+          node.addEventListener("mousedown", event => {
+            event.preventDefault();
+            pick(items[Number(node.dataset.idx)]);
+          });
+        }
+      };
+      const pick = (team) => {
+        if (!team) return;
+        input.value = team.teamTag || "";
+        if (team.teamId) input.dataset.teamId = team.teamId; else delete input.dataset.teamId;
+        close();
+        if (onSelect) onSelect(team);
+      };
+      const search = async (q) => {
+        const mySeq = ++seq;
+        try {
+          const payload = await api(`/api/teams/search?q=${encodeURIComponent(q)}&limit=12`);
+          if (mySeq !== seq) return;
+          items = payload.teams || [];
+          active = -1;
+          render();
+        } catch (error) { /* ignore */ }
+      };
+
+      input.setAttribute("autocomplete", "off");
+      input.addEventListener("input", () => {
+        delete input.dataset.teamId;
+        const q = input.value.trim();
+        if (timer) clearTimeout(timer);
+        if (!q) { close(); return; }
+        timer = setTimeout(() => search(q), 220);
+      });
+      input.addEventListener("focus", () => {
+        const q = input.value.trim();
+        if (q && items.length) box.classList.add("open");
+      });
+      input.addEventListener("keydown", event => {
+        if (!box.classList.contains("open")) return;
+        if (event.key === "ArrowDown") {
+          event.preventDefault(); active = Math.min(items.length - 1, active + 1); render();
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault(); active = Math.max(0, active - 1); render();
+        } else if (event.key === "Enter") {
+          const choice = active >= 0 ? items[active] : items[0];
+          if (choice) pick(choice);
+        } else if (event.key === "Escape") {
+          close();
+        }
+      });
+      document.addEventListener("click", event => {
+        if (!wrap.contains(event.target)) close();
+      });
     }
 
     async function runJob(path, requestBody, statusText) {
@@ -1744,19 +1865,26 @@
         return;
       }
       const s = report.summary || {};
-      const best = ((report.leaderboards || {}).spots || {}).best || [];
-      const worst = ((report.leaderboards || {}).spots || {}).worst || [];
-      const observer = ((report.leaderboards || {}).observer || {}).bestOverall || [];
-      const sentry = ((report.leaderboards || {}).sentry || {}).bestAntiInvis || [];
+      const side = state.wardValueSide || "all";
+      const sideOk = t => side === "all" || t === side;
+      const fb = arr => (arr || []).filter(x => sideOk(x.team));
+      const spotsF = (report.spotDetails || []).filter(sp => sideOk(sp.team));
+      const best = fb(((report.leaderboards || {}).spots || {}).best);
+      const worst = fb(((report.leaderboards || {}).spots || {}).worst);
+      const observer = fb(((report.leaderboards || {}).observer || {}).bestOverall);
+      const sentry = fb(((report.leaderboards || {}).sentry || {}).bestAntiInvis);
       const spotBoards = report.spotLeaderboards || {};
       const [level, cls] = confidence(s.matchCount || 0);
+      const instanceCountF = spotsF.reduce((a, sp) => a + (sp.sampleCount || 0), 0);
+      const observerCountF = spotsF.filter(sp => sp.wardType === "obs").reduce((a, sp) => a + (sp.sampleCount || 0), 0);
+      const sentryCountF = spotsF.filter(sp => sp.wardType === "sen").reduce((a, sp) => a + (sp.sampleCount || 0), 0);
       const boards = [
-        { key: "mostUsed", title: "最常用点位", type: "spot", data: spotBoards.mostUsed || [] },
-        { key: "stableHighValue", title: "稳定高价值", type: "spot", data: spotBoards.stableHighValue || [] },
-        { key: "highRisk", title: "高风险", type: "spot", data: spotBoards.highRisk || [] },
-        { key: "opening", title: "开局固定", type: "spot", data: spotBoards.opening || [] },
-        { key: "longLived", title: "长存活", type: "spot", data: spotBoards.longLived || [] },
-        { key: "sentryTrueSight", title: "真视收益", type: "spot", data: spotBoards.sentryTrueSight || [] },
+        { key: "mostUsed", title: "最常用点位", type: "spot", data: fb(spotBoards.mostUsed) },
+        { key: "stableHighValue", title: "稳定高价值", type: "spot", data: fb(spotBoards.stableHighValue) },
+        { key: "highRisk", title: "高风险", type: "spot", data: fb(spotBoards.highRisk) },
+        { key: "opening", title: "开局固定", type: "spot", data: fb(spotBoards.opening) },
+        { key: "longLived", title: "长存活", type: "spot", data: fb(spotBoards.longLived) },
+        { key: "sentryTrueSight", title: "真视收益", type: "spot", data: fb(spotBoards.sentryTrueSight) },
         { key: "best", title: "最佳点位", type: "spot", data: best },
         { key: "worst", title: "最差点位", type: "spot", data: worst },
         { key: "obsInst", title: "最佳假眼实例", type: "instance", data: observer },
@@ -1764,13 +1892,27 @@
       ];
       el.wardValueContent.className = "";
       el.wardValueContent.innerHTML = `
+        <div class="toolbar">
+          <div>
+            <h2>点位库${side === "all" ? "" : "（" + SIDE_LABEL[side] + "阵营）"}</h2>
+            <div class="subtitle">天辉与夜魇做眼逻辑不同，可切换阵营分别查看该战队的做眼习惯。</div>
+          </div>
+          <div class="actions">
+            <label class="muted" for="wardSideFilter">阵营</label>
+            <select id="wardSideFilter" style="width:120px">
+              <option value="all">全部</option>
+              <option value="radiant">天辉</option>
+              <option value="dire">夜魇</option>
+            </select>
+          </div>
+        </div>
         <div class="summary-grid">
           ${card("目标战队", (report.source || {}).teamTag || el.teamTag.value.trim())}
           ${card("比赛数", s.matchCount || 0, `置信度 ${level}`)}
-          ${card("眼位实例", s.instanceCount || 0)}
-          ${card("Observer", s.observerCount || 0)}
-          ${card("Sentry", s.sentryCount || 0)}
-          ${card("聚类点位", s.spotCount || 0)}
+          ${card("眼位实例", instanceCountF)}
+          ${card("Observer", observerCountF)}
+          ${card("Sentry", sentryCountF)}
+          ${card("聚类点位", spotsF.length)}
           ${card("隐身数据", s.invisibilityDataAvailable ? "可用" : "缺失")}
         </div>
         <div class="result-layout" style="margin-top:14px">
@@ -1789,7 +1931,7 @@
                   <option value="opening">开局固定</option>
                   <option value="sentryTrueSight">真视收益</option>
                 </select>
-                <span class="pill ${cls}">${s.spotCount || 0} 个点位</span>
+                <span class="pill ${cls}">${spotsF.length} 个点位</span>
               </div>
             </div>
             <div class="map-tip" id="wardSpotTip"></div>
@@ -1836,6 +1978,14 @@
 
       drawWardSpotMap();
       document.getElementById("spotBoardFilter")?.addEventListener("change", () => drawWardSpotMap());
+      const sideSel = document.getElementById("wardSideFilter");
+      if (sideSel) {
+        sideSel.value = side;
+        sideSel.addEventListener("change", () => {
+          state.wardValueSide = sideSel.value;
+          renderWardValue();
+        });
+      }
     }
 
     function spotTableBody(spots) {
@@ -1891,8 +2041,11 @@
       const allowed = board === "all"
         ? null
         : new Set(((state.wardValue.spotLeaderboards || {})[board] || []).map(spot => spot.spotId));
+      const mapSide = state.wardValueSide || "all";
+      const mapSideOk = t => mapSide === "all" || t === mapSide;
       for (const spot of state.wardValue.spotDetails || []) {
         if (allowed && !allowed.has(spot.spotId)) continue;
+        if (!mapSideOk(spot.team)) continue;
         if (!spot.pixel) continue;
         const x = spot.pixel.x * sx;
         const y = spot.pixel.y * sy;
@@ -1921,6 +2074,7 @@
         let bestD = Infinity;
         for (const spot of state.wardValue.spotDetails || []) {
           if (allowed && !allowed.has(spot.spotId)) continue;
+          if (!mapSideOk(spot.team)) continue;
           if (!spot.pixel) continue;
           const px = spot.pixel.x * sx;
           const py = spot.pixel.y * sy;
@@ -2128,6 +2282,7 @@
         if (el.opponentTag.value.trim()) params.set("opponent_tag", el.opponentTag.value.trim());
         if (el.patchVersion.value.trim()) params.set("patch_version", el.patchVersion.value.trim());
         if (el.league.value.trim()) params.set("league", el.league.value.trim());
+        if (el.teamTag.dataset.teamId) params.set("team_id", el.teamTag.dataset.teamId);
         const payload = await api(`/api/matches?${params.toString()}`);
         state.matches = payload.matches || [];
         if (state.matches.length === 1) state.selected.add(state.matches[0].matchId);
@@ -2292,12 +2447,17 @@
         el.cmpTeamChips.innerHTML = `<span class="muted">还没有添加战队。</span>`;
         return;
       }
-      el.cmpTeamChips.innerHTML = state.comparisonTeams.map((team, index) => `
+      el.cmpTeamChips.innerHTML = state.comparisonTeams.map((team, index) => {
+        const sideText = (team.radiantCount != null && team.direCount != null)
+          ? `天辉 ${team.radiantCount} / 夜魇 ${team.direCount}`
+          : `${team.matchIds.length} 场`;
+        return `
         <span class="team-chip ${index === 0 ? "focus" : ""}">
           <span class="swatch" style="color:${teamColor(index)};background:${teamColor(index)}"></span>
-          ${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()} <span class="muted">${team.matchIds.length} 场${index === 0 ? " · 分析对象" : ""}</span>
+          ${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()} <span class="muted">${sideText}${index === 0 ? " · 分析对象" : ""}</span>
           <button class="chip-x" data-remove-team="${team.teamTag}">×</button>
-        </span>`).join("");
+        </span>`;
+      }).join("");
       for (const button of el.cmpTeamChips.querySelectorAll("[data-remove-team]")) {
         button.addEventListener("click", () => removeCmpTeam(button.dataset.removeTeam));
       }
@@ -2324,19 +2484,29 @@
         return;
       }
       const recent = Math.max(1, Math.min(50, Number(el.cmpRecent.value || 10)));
-      setStatus(`正在拉取 ${tag.toUpperCase()} 最近 ${recent} 场...`);
+      const teamId = el.cmpTeamTag.dataset.teamId || "";
+      setStatus(`正在拉取 ${tag.toUpperCase()} 每侧最近 ${recent} 场...`);
       el.cmpAddTeam.disabled = true;
       try {
-        const payload = await api(`/api/matches?team_tag=${encodeURIComponent(tag)}&limit=${recent}`);
-        const matchIds = (payload.matches || []).slice(0, recent).map(match => match.matchId);
+        const qs = new URLSearchParams({ team_tag: tag, limit: String(recent) });
+        if (teamId) qs.set("team_id", teamId);
+        const payload = await api(`/api/team/recent-matches?${qs.toString()}`);
+        const matchIds = payload.combined || [];
         if (!matchIds.length) {
           setStatus(`没有查到 ${tag.toUpperCase()} 的比赛。`, true);
           return;
         }
-        state.comparisonTeams.push({ teamTag: tag, matchIds });
+        state.comparisonTeams.push({
+          teamTag: tag,
+          teamId: teamId || null,
+          matchIds,
+          radiantCount: payload.radiantCount,
+          direCount: payload.direCount,
+        });
         el.cmpTeamTag.value = "";
+        delete el.cmpTeamTag.dataset.teamId;
         renderCmpChips();
-        setStatus(`已添加 ${tag.toUpperCase()}（${matchIds.length} 场）。`);
+        setStatus(`已添加 ${tag.toUpperCase()}（天辉 ${payload.radiantCount} / 夜魇 ${payload.direCount} 场）。`);
       } catch (error) {
         setStatus(error.message, true);
       } finally {
@@ -2368,11 +2538,86 @@
       }
     }
 
+    function renderPwChips() {
+      const hasTeams = state.prewarmTeams.length > 0;
+      el.pwRun.disabled = !hasTeams;
+      if (!hasTeams) {
+        el.pwTeamChips.innerHTML = `<span class="muted">还没有添加战队。先搜索并添加。</span>`;
+        return;
+      }
+      el.pwTeamChips.innerHTML = state.prewarmTeams.map(team => {
+        const sideText = (team.radiantCount != null && team.direCount != null)
+          ? `天辉 ${team.radiantCount} / 夜魇 ${team.direCount}`
+          : `${team.matchCount} 场`;
+        return `
+        <span class="team-chip">
+          ${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()}
+          <span class="muted">${sideText}</span>
+          <button class="chip-x" data-pw-remove="${team.teamTag}">×</button>
+        </span>`;
+      }).join("");
+      for (const button of el.pwTeamChips.querySelectorAll("[data-pw-remove]")) {
+        button.addEventListener("click", () => removePwTeam(button.dataset.pwRemove));
+      }
+      hydrateTeamLogos();
+    }
+
+    function removePwTeam(tag) {
+      state.prewarmTeams = state.prewarmTeams.filter(t => t.teamTag.toLowerCase() !== String(tag).toLowerCase());
+      renderPwChips();
+    }
+
+    async function addPrewarmTeam() {
+      const tag = el.pwTeamTag.value.trim();
+      if (!tag) {
+        setStatus("请输入要搜索的战队 Tag。", true);
+        return;
+      }
+      if (state.prewarmTeams.length >= 12) {
+        setStatus("最多预热 12 支战队。", true);
+        return;
+      }
+      if (state.prewarmTeams.some(t => t.teamTag.toLowerCase() === tag.toLowerCase())) {
+        setStatus(`${tag.toUpperCase()} 已在列表中。`, true);
+        return;
+      }
+      const recent = Math.max(1, Math.min(50, Number(el.pwRecent.value || 10)));
+      const teamId = el.pwTeamTag.dataset.teamId || "";
+      el.pwSearchAdd.disabled = true;
+      setStatus(`正在搜索 ${tag.toUpperCase()} 每侧最近 ${recent} 场...`);
+      try {
+        const qs = new URLSearchParams({ team_tag: tag, limit: String(recent) });
+        if (teamId) qs.set("team_id", teamId);
+        const payload = await api(`/api/team/recent-matches?${qs.toString()}`);
+        const matchIds = payload.combined || [];
+        if (!matchIds.length) {
+          setStatus(`没有查到 ${tag.toUpperCase()} 的比赛，未添加。`, true);
+          return;
+        }
+        state.prewarmTeams.push({
+          teamTag: tag,
+          teamId: teamId || null,
+          matchCount: matchIds.length,
+          radiantCount: payload.radiantCount,
+          direCount: payload.direCount,
+          name: null,
+        });
+        el.pwTeamTag.value = "";
+        delete el.pwTeamTag.dataset.teamId;
+        renderPwChips();
+        setStatus(`已添加 ${tag.toUpperCase()}（天辉 ${payload.radiantCount} / 夜魇 ${payload.direCount} 场）。继续添加或点击“开始预热”。`);
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        el.pwSearchAdd.disabled = false;
+      }
+    }
+
     async function runPrewarm() {
-      const raw = String(el.pwTeams.value || "").split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
-      const teams = [...new Set(raw.map(s => s.toLowerCase()))].map(low => raw.find(s => s.toLowerCase() === low));
+      const teams = state.prewarmTeams.map(t => t.teamTag);
+      const teamIds = state.prewarmTeams.map(t => t.teamId || null);
       if (!teams.length) {
-        setStatus("请至少填写一支战队 Tag。", true);
+        setStatus("请先搜索并添加至少一支战队。", true);
         return;
       }
       const recent = Math.max(1, Math.min(50, Number(el.pwRecent.value || 10)));
@@ -2390,6 +2635,7 @@
       try {
         const report = await runJob("/api/prewarm", {
           teams,
+          teamIds,
           recent,
           start: window.start,
           end: window.end,
@@ -2553,9 +2799,18 @@
       }
       const tags = report.source.teamTags || [];
       const focus = report.source.focusTeam;
-      const teams = report.teams || [];
-      const spots = report.spots || [];
-      const diag = report.diagnostics || {};
+      const cmpSide = state.comparisonSide || "all";
+      const cmpSideOk = t => cmpSide === "all" || t === cmpSide;
+      const teams = cmpSide === "all"
+        ? (report.teams || [])
+        : ((report.teamSideSummaries || {})[cmpSide] || report.teams || []);
+      const spots = (report.spots || []).filter(sp => cmpSideOk(sp.team));
+      const diagRaw = report.diagnostics || {};
+      const diag = {
+        signatureSpots: (diagRaw.signatureSpots || []).filter(x => cmpSideOk(x.team)),
+        overusedLowValueSpots: (diagRaw.overusedLowValueSpots || []).filter(x => cmpSideOk(x.team)),
+        underusedHighValueSpots: (diagRaw.underusedHighValueSpots || []).filter(x => cmpSideOk(x.team)),
+      };
       const maxSpotCount = Math.max(1, ...teams.map(team => team.spotCount || 0));
 
       const summaryRows = teams.map((team, index) => `
@@ -2609,14 +2864,22 @@
         <div class="panel">
           <div class="toolbar">
             <div>
-              <h2>对比结果</h2>
-              <div class="subtitle">分析对象：<strong>${focus.toUpperCase()}</strong>，基准为其余战队。点位按阵营+位置共享聚类。</div>
+              <h2>对比结果${cmpSide === "all" ? "" : "（" + SIDE_LABEL[cmpSide] + "阵营）"}</h2>
+              <div class="subtitle">分析对象：<strong>${focus.toUpperCase()}</strong>，基准为其余战队。天辉/夜魇做眼逻辑不同，可切换阵营分别对比。</div>
             </div>
-            <div class="pill-row">
-              <span class="pill">${report.summary.teamCount} 支战队</span>
-              <span class="pill">${report.summary.spotCount} 个共享点位</span>
-              <span class="pill">${report.source.invisibilityDataAvailable ? "隐身数据可用" : "隐身数据缺失"}</span>
+            <div class="actions">
+              <label class="muted" for="cmpSideFilter">阵营</label>
+              <select id="cmpSideFilter" style="width:120px">
+                <option value="all">全部</option>
+                <option value="radiant">天辉</option>
+                <option value="dire">夜魇</option>
+              </select>
             </div>
+          </div>
+          <div class="pill-row" style="margin-top:10px">
+            <span class="pill">${report.summary.teamCount} 支战队</span>
+            <span class="pill">${spots.length} 个共享点位</span>
+            <span class="pill">${report.source.invisibilityDataAvailable ? "隐身数据可用" : "隐身数据缺失"}</span>
           </div>
           <div class="viz-grid">
             <div class="panel" style="background:var(--surface-3)">
@@ -2667,6 +2930,14 @@
       for (const row of el.compareContent.querySelectorAll("[data-cmp-spot]")) {
         row.addEventListener("click", () => drawComparisonMap(row.dataset.cmpSpot));
       }
+      const cmpSideSel = document.getElementById("cmpSideFilter");
+      if (cmpSideSel) {
+        cmpSideSel.value = cmpSide;
+        cmpSideSel.addEventListener("change", () => {
+          state.comparisonSide = cmpSideSel.value;
+          renderComparison();
+        });
+      }
       hydrateTeamLogos();
     }
 
@@ -2701,7 +2972,8 @@
       const sx = canvas.width / 851;
       const sy = canvas.height / 851;
       const tags = state.comparison.source.teamTags || [];
-      const spots = state.comparison.spots || [];
+      const cmpSide = state.comparisonSide || "all";
+      const spots = (state.comparison.spots || []).filter(sp => cmpSide === "all" || sp.team === cmpSide);
       for (const spot of spots) {
         if (!spot.pixel) continue;
         const x = spot.pixel.x * sx;
@@ -2759,6 +3031,9 @@
     for (const button of document.querySelectorAll("[data-section]")) {
       button.addEventListener("click", () => showSection(button.dataset.section));
     }
+    attachTeamSearch(el.teamTag);
+    attachTeamSearch(el.cmpTeamTag);
+    attachTeamSearch(el.pwTeamTag);
     el.loadMatches.addEventListener("click", loadMatches);
     el.compute.addEventListener("click", compute);
     el.computeWardValue.addEventListener("click", computeWardValue);
@@ -2773,7 +3048,11 @@
     });
     el.selectRecent.addEventListener("click", () => {
       const count = Math.max(1, Number(el.recentCount.value || 1));
-      state.selected = new Set(state.matches.slice(0, count).map(match => match.matchId));
+      const radIds = state.matches.filter(m => m.teamSide === "radiant").slice(0, count).map(m => m.matchId);
+      const direIds = state.matches.filter(m => m.teamSide === "dire").slice(0, count).map(m => m.matchId);
+      const chosen = new Set([...radIds, ...direIds]);
+      // 保持与全局时间倒序一致，便于命中预热缓存
+      state.selected = new Set(state.matches.filter(m => chosen.has(m.matchId)).map(m => m.matchId));
       renderMatches();
       renderSearchOverview();
       renderWardValue();
@@ -2796,9 +3075,17 @@
     });
 
     el.pwRun.addEventListener("click", runPrewarm);
-    el.pwTeams.addEventListener("keydown", event => {
-      if (event.key === "Enter") runPrewarm();
+    el.pwSearchAdd.addEventListener("click", addPrewarmTeam);
+    el.pwTeamTag.addEventListener("keydown", event => {
+      if (event.key === "Enter") addPrewarmTeam();
     });
+    el.pwClear.addEventListener("click", () => {
+      state.prewarmTeams = [];
+      state.prewarm = null;
+      renderPwChips();
+      renderPrewarm();
+    });
+    renderPwChips();
     el.cmpTeamTag.addEventListener("keydown", event => {
       if (event.key === "Enter") addCmpTeam();
     });

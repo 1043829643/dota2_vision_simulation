@@ -63,7 +63,7 @@ DEFAULT_DB = _env_or_config("DOTA_DB_DATABASE", "dota2_analysis")
 DEFAULT_OVERVIEW_DB = _env_or_config("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
 CACHE_VERSION = "ward-hero-visibility-v8"
 WARD_VALUE_CACHE_VERSION = "ward-value-v1"
-COMPARISON_CACHE_VERSION = "team-comparison-v1"
+COMPARISON_CACHE_VERSION = "team-comparison-v2"
 DEFAULT_CACHE_ROOT = "/tmp/dota_vision_web_cache" if os.environ.get("DEPLOY_RUN_PORT") else str(PROJECT_ROOT / "outputs" / "web_cache")
 CACHE_ROOT = Path(_env_or_config("DOTA_CACHE_ROOT", DEFAULT_CACHE_ROOT))
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=int(_env_or_config("DOTA_JOB_WORKERS", "2")))
@@ -74,6 +74,11 @@ MAX_JOBS = 100
 TEAM_LOGO_CACHE_FILE = "team_logos.json"
 TEAM_LOGO_LOCK = Lock()
 _TEAM_LOGO_CACHE: dict | None = None
+
+TEAM_DIRECTORY_CACHE_FILE = "team_directory.json"
+TEAM_DIRECTORY_LOCK = Lock()
+_TEAM_DIRECTORY_CACHE: dict | None = None
+TEAM_DIRECTORY_TTL = 24 * 3600
 
 
 class VisibilityRequest(BaseModel):
@@ -109,6 +114,7 @@ class TeamComparisonRequest(BaseModel):
 
 class PrewarmRequest(BaseModel):
     teams: list[str] = Field(min_length=1, max_length=12)
+    teamIds: list[str | None] | None = None
     recent: int = Field(default=10, ge=1, le=50)
     start: int | None = None
     end: int | None = None
@@ -847,6 +853,19 @@ def team_comparison_report(payload: TeamComparisonRequest) -> dict:
         team_instances = [item for item in instances if item["teamTag"] == tag]
         team_summaries.append(_team_summary(tag, team_instances, team_spot_ids[tag]))
 
+    # 按阵营（天辉/夜魇）分别汇总，供前端阵营筛选使用。
+    team_side_summaries: dict[str, list[dict]] = {"radiant": [], "dire": []}
+    for side in ("radiant", "dire"):
+        for tag in team_tags:
+            side_instances = [
+                item for item in instances
+                if item["teamTag"] == tag and item.get("team") == side
+            ]
+            side_spot_ids = {str(item.get("spotId")) for item in side_instances}
+            summary = _team_summary(tag, side_instances, side_spot_ids)
+            summary["side"] = side
+            team_side_summaries[side].append(summary)
+
     spot_rows = []
     for spot in spots:
         members = instances_by_spot.get(spot["spotId"], [])
@@ -951,6 +970,7 @@ def team_comparison_report(payload: TeamComparisonRequest) -> dict:
             "focusTeam": focus_tag,
         },
         "teams": team_summaries,
+        "teamSideSummaries": team_side_summaries,
         "spots": spot_rows,
         "diagnostics": {
             "signatureSpots": signature_spots[:20],
@@ -987,8 +1007,71 @@ LIMIT %s
     return [int(row["matchId"]) for row in rows]
 
 
+def resolve_recent_matches_by_side(cursor, team_tag: str, limit: int, team_id: str | None = None) -> dict:
+    """分别取该战队作为天辉/夜魇的最近 N 场，再按时间合并去重。
+    保证两个阵营各有最多 N 场样本（天辉夜魇做眼逻辑不同）。
+    若提供 team_id，则按 team_id 精确匹配（tag 不可靠时更准确）。"""
+    tid = str(team_id or "").strip()
+    use_id = tid not in ("", "0")
+
+    def _query(side: str) -> list[dict]:
+        if side == "radiant":
+            id_col, tag_col = "radiant_team_id", "radiant_team_tag"
+        else:
+            id_col, tag_col = "dire_team_id", "dire_team_tag"
+        if use_id:
+            where = f"CAST(mi.{id_col} AS CHAR)=%s"
+            arg = tid
+        else:
+            where = f"LOWER(mi.{tag_col})=LOWER(%s)"
+            arg = team_tag
+        query = f"""
+SELECT CAST(mi.match_id AS BIGINT) AS matchId,
+       COALESCE(ov.start_time, mi.end_time) AS ts
+FROM match_info mi
+LEFT JOIN `{DEFAULT_OVERVIEW_DB}`.`dwd_match_overview` ov
+  ON CAST(mi.match_id AS BIGINT)=ov.match_id
+WHERE {where}
+ORDER BY COALESCE(ov.start_time, mi.end_time) DESC
+LIMIT %s
+"""
+        cursor.execute(query, [arg, limit])
+        return list(cursor.fetchall())
+
+    radiant_rows = _query("radiant")
+    dire_rows = _query("dire")
+    radiant = [int(r["matchId"]) for r in radiant_rows]
+    dire = [int(r["matchId"]) for r in dire_rows]
+
+    merged: dict[int, int] = {}
+    for r in radiant_rows + dire_rows:
+        mid = int(r["matchId"])
+        ts = int(r["ts"]) if r.get("ts") is not None else 0
+        if mid not in merged or ts > merged[mid]:
+            merged[mid] = ts
+    combined = [mid for mid, _ in sorted(merged.items(), key=lambda kv: (-kv[1], -kv[0]))]
+
+    return {
+        "radiant": radiant,
+        "dire": dire,
+        "combined": combined,
+        "radiantCount": len(radiant),
+        "direCount": len(dire),
+    }
+
+
 def prewarm_report(payload: PrewarmRequest, progress=None) -> dict:
-    tags = [tag.strip() for tag in payload.teams if tag and tag.strip()]
+    team_ids = payload.teamIds or []
+    tag_to_id: dict[str, str] = {}
+    tags = []
+    for idx, raw in enumerate(payload.teams):
+        tag = (raw or "").strip()
+        if not tag:
+            continue
+        tags.append(tag)
+        tid = str(team_ids[idx]).strip() if idx < len(team_ids) and team_ids[idx] else ""
+        if tid and tid not in ("0", "None"):
+            tag_to_id.setdefault(tag.lower(), tid)
     seen: set[str] = set()
     unique_tags: list[str] = []
     for tag in tags:
@@ -1006,8 +1089,15 @@ def prewarm_report(payload: PrewarmRequest, progress=None) -> dict:
     with connect() as conn:
         with conn.cursor() as cursor:
             for tag in unique_tags:
-                match_ids = resolve_recent_match_ids(cursor, tag, payload.recent)
-                resolved.append({"teamTag": tag, "matchIds": match_ids})
+                tid = tag_to_id.get(tag.lower())
+                sides = resolve_recent_matches_by_side(cursor, tag, payload.recent, tid)
+                resolved.append({
+                    "teamTag": tag,
+                    "teamId": tid,
+                    "matchIds": sides["combined"],
+                    "radiantCount": sides["radiantCount"],
+                    "direCount": sides["direCount"],
+                })
 
     do_ward_value = payload.includeWardValue
     do_comparison = payload.includeComparison and len([t for t in resolved if t["matchIds"]]) >= 2
@@ -1275,6 +1365,173 @@ def get_team_logos(tags: list[str]) -> dict:
     return result
 
 
+def _team_directory_cache_path() -> Path:
+    return CACHE_ROOT / TEAM_DIRECTORY_CACHE_FILE
+
+
+def _load_team_directory_cache() -> dict | None:
+    global _TEAM_DIRECTORY_CACHE
+    if _TEAM_DIRECTORY_CACHE is not None:
+        return _TEAM_DIRECTORY_CACHE
+    path = _team_directory_cache_path()
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("teams"), list):
+                _TEAM_DIRECTORY_CACHE = loaded
+                return _TEAM_DIRECTORY_CACHE
+        except Exception:
+            pass
+    return None
+
+
+def _save_team_directory_cache(data: dict) -> None:
+    global _TEAM_DIRECTORY_CACHE
+    _TEAM_DIRECTORY_CACHE = data
+    path = _team_directory_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(path)
+    except Exception:
+        pass
+
+
+def _aggregate_teams(cursor) -> list[dict]:
+    """从 match_info 汇总所有战队：按 team_id 归并，取出现最多的 tag 与比赛场数。
+    team_id 为 0/空的（个人/无战队局）按 tag 归并。"""
+    query = """
+SELECT team_id, tag, COUNT(*) AS c FROM (
+  SELECT CAST(radiant_team_id AS CHAR) AS team_id, radiant_team_tag AS tag FROM match_info
+  UNION ALL
+  SELECT CAST(dire_team_id AS CHAR) AS team_id, dire_team_tag AS tag FROM match_info
+) t
+GROUP BY team_id, tag
+"""
+    cursor.execute(query)
+    rows = list(cursor.fetchall())
+    by_id: dict[str, dict] = {}
+    for row in rows:
+        team_id = str(row.get("team_id") or "").strip()
+        tag = (row.get("tag") or "").strip()
+        count = int(row.get("c") or 0)
+        has_id = team_id not in ("", "0")
+        key = team_id if has_id else f"tag::{tag.lower()}"
+        if not has_id and not tag:
+            continue
+        entry = by_id.get(key)
+        if entry is None:
+            entry = {"teamId": team_id if has_id else None, "matchCount": 0, "_tags": {}}
+            by_id[key] = entry
+        entry["matchCount"] += count
+        if tag:
+            entry["_tags"][tag] = entry["_tags"].get(tag, 0) + count
+    teams: list[dict] = []
+    for entry in by_id.values():
+        tags = entry.pop("_tags", {})
+        dominant_tag = max(tags.items(), key=lambda kv: kv[1])[0] if tags else ""
+        entry["tag"] = dominant_tag
+        teams.append(entry)
+    teams.sort(key=lambda e: e["matchCount"], reverse=True)
+    return teams
+
+
+def build_team_directory(force: bool = False, enrich_top: int = 160) -> dict:
+    """构建战队目录（tag / team_id / 场数 / 官方名 / logo），带磁盘缓存。
+    官方名来自 Valve webapi（复用 logo 缓存），只为出场较多的战队补齐，避免过多外部请求。"""
+    now = int(datetime.now(timezone.utc).timestamp())
+    with TEAM_DIRECTORY_LOCK:
+        if not force:
+            cached = _load_team_directory_cache()
+            if cached and now - int(cached.get("builtAt") or 0) < TEAM_DIRECTORY_TTL:
+                return cached
+
+        conn = connect()
+        try:
+            with conn.cursor() as cursor:
+                teams = _aggregate_teams(cursor)
+        finally:
+            conn.close()
+
+        # 复用 logo 缓存里的官方名，缺失的（仅出场较多的）并行补齐
+        with TEAM_LOGO_LOCK:
+            logo_cache = _load_team_logo_cache()
+            by_id_logo = logo_cache["byId"]
+
+        to_fetch: list[str] = []
+        for idx, team in enumerate(teams):
+            tid = team.get("teamId")
+            info = by_id_logo.get(str(tid)) if tid else None
+            if info:
+                team["name"] = info.get("name") or team["tag"]
+                team["logoUrl"] = info.get("logoUrl")
+            elif tid and idx < enrich_top:
+                to_fetch.append(str(tid))
+                team["name"] = team["tag"]
+                team["logoUrl"] = None
+            else:
+                team["name"] = team["tag"]
+                team["logoUrl"] = None
+
+        if to_fetch:
+            def _fetch(tid: str):
+                info = fetch_team_info(tid)
+                if not info:
+                    return tid, None
+                return tid, {
+                    "name": info.get("name") or None,
+                    "logoUrl": info.get("url_logo") or None,
+                    "tag": info.get("tag") or None,
+                }
+
+            fetched: dict[str, dict | None] = {}
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                for tid, info in pool.map(_fetch, to_fetch):
+                    fetched[tid] = info
+
+            with TEAM_LOGO_LOCK:
+                logo_cache = _load_team_logo_cache()
+                by_id_logo = logo_cache["byId"]
+                for tid, info in fetched.items():
+                    if info:
+                        by_id_logo[str(tid)] = info
+                _save_team_logo_cache()
+
+            id_to_team = {str(t.get("teamId")): t for t in teams if t.get("teamId")}
+            for tid, info in fetched.items():
+                team = id_to_team.get(str(tid))
+                if team and info:
+                    if info.get("name"):
+                        team["name"] = info["name"]
+                    team["logoUrl"] = info.get("logoUrl")
+
+        data = {"builtAt": now, "teams": teams}
+        _save_team_directory_cache(data)
+        return data
+
+
+def search_teams(query_text: str, limit: int = 20) -> list[dict]:
+    q = (query_text or "").strip().lower()
+    directory = build_team_directory()
+    teams = directory.get("teams", [])
+    if not q:
+        return teams[:limit]
+    exact: list[dict] = []
+    starts: list[dict] = []
+    contains: list[dict] = []
+    for team in teams:
+        name = (team.get("name") or "").lower()
+        tag = (team.get("tag") or "").lower()
+        if q == name or q == tag:
+            exact.append(team)
+        elif name.startswith(q) or tag.startswith(q):
+            starts.append(team)
+        elif q in name or q in tag:
+            contains.append(team)
+    return (exact + starts + contains)[:limit]
+
+
 app = FastAPI(title="Dota Ward Vision Query")
 
 
@@ -1396,6 +1653,42 @@ def create_prewarm_job(request: PrewarmRequest) -> dict:
     return create_job("prewarm", prewarm_job_runner, request)
 
 
+@app.get("/api/teams/search")
+def teams_search(
+    q: str = Query("", max_length=64),
+    limit: int = Query(20, ge=1, le=50),
+    rebuild: bool = Query(False),
+) -> dict:
+    if rebuild:
+        build_team_directory(force=True)
+    results = search_teams(q, limit)
+    return {
+        "query": q,
+        "teams": [
+            {
+                "teamTag": t.get("tag"),
+                "teamId": t.get("teamId"),
+                "name": t.get("name"),
+                "matchCount": t.get("matchCount"),
+                "logoUrl": t.get("logoUrl"),
+            }
+            for t in results
+        ],
+    }
+
+
+@app.get("/api/team/recent-matches")
+def team_recent_matches(
+    team_tag: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+    team_id: str | None = Query(None),
+) -> dict:
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            data = resolve_recent_matches_by_side(cursor, team_tag, limit, team_id)
+    return {"teamTag": team_tag, "teamId": team_id, **data}
+
+
 @app.get("/api/teams/logos")
 def team_logos(tags: str = Query(..., min_length=1)) -> dict:
     tag_list = [t for t in (tags or "").split(",") if t.strip()]
@@ -1413,11 +1706,26 @@ def list_matches(
     opponent_tag: str | None = Query(None),
     patch_version: str | None = Query(None),
     league: str | None = Query(None),
+    team_id: str | None = Query(None),
 ) -> dict:
-    filters = [
-        "(LOWER(mi.radiant_team_tag)=LOWER(%s) OR LOWER(mi.dire_team_tag)=LOWER(%s))"
-    ]
-    params: list = [team_tag, team_tag, team_tag, team_tag]
+    tid = str(team_id or "").strip()
+    use_id = tid not in ("", "0")
+    if use_id:
+        side_case = (
+            "CASE WHEN CAST(mi.radiant_team_id AS CHAR)=%s THEN 'radiant' "
+            "WHEN CAST(mi.dire_team_id AS CHAR)=%s THEN 'dire' ELSE '' END"
+        )
+        side_params: list = [tid, tid]
+        filters = ["(CAST(mi.radiant_team_id AS CHAR)=%s OR CAST(mi.dire_team_id AS CHAR)=%s)"]
+        params: list = [tid, tid]
+    else:
+        side_case = (
+            "CASE WHEN LOWER(mi.radiant_team_tag)=LOWER(%s) THEN 'radiant' "
+            "WHEN LOWER(mi.dire_team_tag)=LOWER(%s) THEN 'dire' ELSE '' END"
+        )
+        side_params = [team_tag, team_tag]
+        filters = ["(LOWER(mi.radiant_team_tag)=LOWER(%s) OR LOWER(mi.dire_team_tag)=LOWER(%s))"]
+        params = [team_tag, team_tag]
     if opponent_tag:
         filters.append(
             "((LOWER(mi.radiant_team_tag)=LOWER(%s) AND LOWER(mi.dire_team_tag)=LOWER(%s)) "
@@ -1430,18 +1738,14 @@ def list_matches(
     if league:
         filters.append("LOWER(ov.league_name) LIKE LOWER(%s)")
         params.append(f"%{league}%")
-    params.append(limit)
+    exec_params = side_params + params + [limit]
     where_sql = " AND ".join(filters)
     query = f"""
 SELECT
   CAST(mi.match_id AS BIGINT) AS matchId,
   mi.radiant_team_tag AS radiantTeamTag,
   mi.dire_team_tag AS direTeamTag,
-  CASE
-    WHEN LOWER(mi.radiant_team_tag)=LOWER(%s) THEN 'radiant'
-    WHEN LOWER(mi.dire_team_tag)=LOWER(%s) THEN 'dire'
-    ELSE ''
-  END AS teamSide,
+  {side_case} AS teamSide,
   ov.duration,
   ov.patch_version AS patchVersion,
   ov.league_name AS leagueName,
@@ -1456,12 +1760,12 @@ LIMIT %s
 """
     with connect() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(query, params)
+            cursor.execute(query, exec_params)
             rows = list(cursor.fetchall())
     for row in rows:
         if row.get("startDate") is not None:
             row["startDate"] = str(row["startDate"])
-    return {"teamTag": team_tag, "matches": rows}
+    return {"teamTag": team_tag, "teamId": tid or None, "matches": rows}
 
 
 @app.post("/api/visibility")
