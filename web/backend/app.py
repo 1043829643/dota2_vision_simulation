@@ -5,6 +5,9 @@ import os
 import sys
 import hashlib
 import uuid
+import urllib.request
+import urllib.error
+import urllib.parse
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -68,6 +71,10 @@ JOB_LOCK = Lock()
 JOBS: dict[str, dict] = {}
 MAX_JOBS = 100
 
+TEAM_LOGO_CACHE_FILE = "team_logos.json"
+TEAM_LOGO_LOCK = Lock()
+_TEAM_LOGO_CACHE: dict | None = None
+
 
 class VisibilityRequest(BaseModel):
     teamTag: str = Field(min_length=1)
@@ -98,6 +105,17 @@ class TeamComparisonRequest(BaseModel):
     end: int | None = None
     forceRefresh: bool = False
     clusterEps: float = Field(default=200.0, gt=0)
+
+
+class PrewarmRequest(BaseModel):
+    teams: list[str] = Field(min_length=1, max_length=12)
+    recent: int = Field(default=10, ge=1, le=50)
+    start: int | None = None
+    end: int | None = None
+    clusterEps: float = Field(default=200.0, gt=0)
+    forceRefresh: bool = False
+    includeWardValue: bool = True
+    includeComparison: bool = True
 
 
 def db_config() -> dict:
@@ -952,6 +970,311 @@ def cached_team_comparison_report(payload: TeamComparisonRequest) -> dict:
     return report
 
 
+def resolve_recent_match_ids(cursor, team_tag: str, limit: int) -> list[int]:
+    """复现 /api/matches?team_tag=X&limit=N 的排序，返回该战队最近 N 场 match_id。
+    保持与前端“多战队对比”取比赛完全一致，从而命中缓存。"""
+    query = f"""
+SELECT CAST(mi.match_id AS BIGINT) AS matchId
+FROM match_info mi
+LEFT JOIN `{DEFAULT_OVERVIEW_DB}`.`dwd_match_overview` ov
+  ON CAST(mi.match_id AS BIGINT)=ov.match_id
+WHERE (LOWER(mi.radiant_team_tag)=LOWER(%s) OR LOWER(mi.dire_team_tag)=LOWER(%s))
+ORDER BY COALESCE(ov.start_time, mi.end_time) DESC
+LIMIT %s
+"""
+    cursor.execute(query, [team_tag, team_tag, limit])
+    rows = list(cursor.fetchall())
+    return [int(row["matchId"]) for row in rows]
+
+
+def prewarm_report(payload: PrewarmRequest, progress=None) -> dict:
+    tags = [tag.strip() for tag in payload.teams if tag and tag.strip()]
+    seen: set[str] = set()
+    unique_tags: list[str] = []
+    for tag in tags:
+        key = tag.lower()
+        if key not in seen:
+            seen.add(key)
+            unique_tags.append(tag)
+    if not unique_tags:
+        raise ValueError("请至少提供一个有效的战队 Tag。")
+
+    if progress:
+        progress({"phase": "resolving", "message": "正在解析各战队最近比赛", "percent": 0})
+
+    resolved: list[dict] = []
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            for tag in unique_tags:
+                match_ids = resolve_recent_match_ids(cursor, tag, payload.recent)
+                resolved.append({"teamTag": tag, "matchIds": match_ids})
+
+    do_ward_value = payload.includeWardValue
+    do_comparison = payload.includeComparison and len([t for t in resolved if t["matchIds"]]) >= 2
+    total_steps = (len(resolved) if do_ward_value else 0) + (1 if do_comparison else 0)
+    total_steps = max(1, total_steps)
+    step_index = 0
+
+    def sub_progress(label: str):
+        def cb(p: dict) -> None:
+            if not progress:
+                return
+            inner = p.get("percent")
+            frac = (float(inner) / 100.0) if isinstance(inner, (int, float)) else 0.0
+            overall = round((step_index + min(1.0, max(0.0, frac))) / total_steps * 100, 1)
+            progress({
+                "phase": "prewarm",
+                "message": f"{label}｜{p.get('message', '')}",
+                "percent": overall,
+                "step": step_index + 1,
+                "totalSteps": total_steps,
+            })
+        return cb
+
+    ward_value_results: list[dict] = []
+    if do_ward_value:
+        for team in resolved:
+            label = f"点位库 {team['teamTag'].upper()}"
+            if not team["matchIds"]:
+                ward_value_results.append({
+                    "teamTag": team["teamTag"],
+                    "matchIds": [],
+                    "status": "skipped",
+                    "reason": "没有查到该战队的比赛",
+                })
+                step_index += 1
+                continue
+            if progress:
+                progress({
+                    "phase": "prewarm",
+                    "message": f"开始 {label}",
+                    "percent": round(step_index / total_steps * 100, 1),
+                    "step": step_index + 1,
+                    "totalSteps": total_steps,
+                })
+            wv_req = WardValueRequest(
+                teamTag=team["teamTag"],
+                matchIds=team["matchIds"],
+                start=payload.start,
+                end=payload.end,
+                forceRefresh=payload.forceRefresh,
+                clusterEps=payload.clusterEps,
+            )
+            report = cached_ward_value_report(wv_req, sub_progress(label))
+            ward_value_results.append({
+                "teamTag": team["teamTag"],
+                "matchIds": team["matchIds"],
+                "status": "ok",
+                "cacheHit": bool((report.get("cache") or {}).get("hit")),
+                "spotCount": (report.get("summary") or {}).get("spotCount"),
+                "instanceCount": (report.get("summary") or {}).get("instanceCount"),
+            })
+            step_index += 1
+
+    comparison_result = None
+    if do_comparison:
+        cmp_teams = [team for team in resolved if team["matchIds"]]
+        label = "多战队对比"
+        if progress:
+            progress({
+                "phase": "prewarm",
+                "message": f"开始 {label}",
+                "percent": round(step_index / total_steps * 100, 1),
+                "step": step_index + 1,
+                "totalSteps": total_steps,
+            })
+        cmp_req = TeamComparisonRequest(
+            teams=[ComparisonTeam(teamTag=team["teamTag"], matchIds=team["matchIds"]) for team in cmp_teams],
+            start=payload.start,
+            end=payload.end,
+            forceRefresh=payload.forceRefresh,
+            clusterEps=payload.clusterEps,
+        )
+        report = cached_team_comparison_report(cmp_req)
+        comparison_result = {
+            "teams": [{"teamTag": team["teamTag"], "matchIds": team["matchIds"]} for team in cmp_teams],
+            "status": "ok",
+            "cacheHit": bool((report.get("cache") or {}).get("hit")),
+            "spotCount": (report.get("summary") or {}).get("spotCount"),
+            "focusTeam": (report.get("summary") or {}).get("focusTeam"),
+        }
+        step_index += 1
+
+    if progress:
+        progress({"phase": "finished", "message": "预热完成", "percent": 100})
+
+    return {
+        "params": {
+            "recent": payload.recent,
+            "start": payload.start,
+            "end": payload.end,
+            "clusterEps": payload.clusterEps,
+            "forceRefresh": payload.forceRefresh,
+            "includeWardValue": payload.includeWardValue,
+            "includeComparison": payload.includeComparison,
+        },
+        "teams": resolved,
+        "wardValue": ward_value_results,
+        "comparison": comparison_result,
+    }
+
+
+def prewarm_job_runner(payload: PrewarmRequest, progress) -> dict:
+    return prewarm_report(payload, progress)
+
+
+def _team_logo_cache_path() -> Path:
+    return CACHE_ROOT / TEAM_LOGO_CACHE_FILE
+
+
+def _load_team_logo_cache() -> dict:
+    global _TEAM_LOGO_CACHE
+    if _TEAM_LOGO_CACHE is not None:
+        return _TEAM_LOGO_CACHE
+    path = _team_logo_cache_path()
+    data = {"byTag": {}, "byId": {}}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data["byTag"] = loaded.get("byTag", {}) or {}
+                data["byId"] = loaded.get("byId", {}) or {}
+        except Exception:
+            pass
+    _TEAM_LOGO_CACHE = data
+    return data
+
+
+def _save_team_logo_cache() -> None:
+    if _TEAM_LOGO_CACHE is None:
+        return
+    path = _team_logo_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(_TEAM_LOGO_CACHE, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(path)
+    except Exception:
+        pass
+
+
+def resolve_team_id(cursor, team_tag: str) -> str | None:
+    """从 match_info 里按 team_tag 找一个非空 team_id（取出现最多的）。"""
+    query = """
+SELECT team_id, COUNT(*) AS c FROM (
+  SELECT radiant_team_id AS team_id FROM match_info
+    WHERE LOWER(radiant_team_tag)=LOWER(%s) AND radiant_team_id IS NOT NULL AND radiant_team_id NOT IN ('0','')
+  UNION ALL
+  SELECT dire_team_id AS team_id FROM match_info
+    WHERE LOWER(dire_team_tag)=LOWER(%s) AND dire_team_id IS NOT NULL AND dire_team_id NOT IN ('0','')
+) t
+GROUP BY team_id ORDER BY c DESC LIMIT 1
+"""
+    cursor.execute(query, [team_tag, team_tag])
+    row = cursor.fetchone()
+    if not row:
+        return None
+    team_id = str(row.get("team_id") or "").strip()
+    return team_id or None
+
+
+def fetch_team_info(team_id: str) -> dict | None:
+    """调用 Valve 官方 webapi 获取战队信息。失败返回 None。"""
+    url = f"https://www.dota2.com/webapi/IDOTA2Teams/GetSingleTeamInfo/v001?team_id={urllib.parse.quote(str(team_id))}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (dota2-vision)"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        return json.loads(raw)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+
+
+def get_team_logos(tags: list[str]) -> dict:
+    """返回 {tag_lower: {teamTag, teamId, name, logoUrl}}，带文件缓存。"""
+    result: dict[str, dict] = {}
+    tags_clean: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        norm = str(tag or "").strip()
+        low = norm.lower()
+        if norm and low not in seen:
+            seen.add(low)
+            tags_clean.append(norm)
+    if not tags_clean:
+        return result
+
+    with TEAM_LOGO_LOCK:
+        cache = _load_team_logo_cache()
+        by_tag = cache["byTag"]
+        by_id = cache["byId"]
+        dirty = False
+        need_resolve: list[str] = []
+
+        for tag in tags_clean:
+            low = tag.lower()
+            entry = by_tag.get(low)
+            if entry is not None:
+                team_id = entry.get("teamId")
+                info = by_id.get(str(team_id)) if team_id else None
+                result[low] = {
+                    "teamTag": tag,
+                    "teamId": team_id,
+                    "name": (info or {}).get("name") if info else entry.get("name"),
+                    "logoUrl": (info or {}).get("logoUrl") if info else entry.get("logoUrl"),
+                }
+            else:
+                need_resolve.append(tag)
+
+        if need_resolve:
+            conn = None
+            cursor = None
+            try:
+                conn = connect()
+                cursor = conn.cursor()
+            except Exception:
+                cursor = None
+            for tag in need_resolve:
+                low = tag.lower()
+                team_id = None
+                if cursor is not None:
+                    try:
+                        team_id = resolve_team_id(cursor, tag)
+                    except Exception:
+                        team_id = None
+                name = None
+                logo_url = None
+                if team_id:
+                    cached_info = by_id.get(str(team_id))
+                    if cached_info:
+                        name = cached_info.get("name")
+                        logo_url = cached_info.get("logoUrl")
+                    else:
+                        info = fetch_team_info(team_id)
+                        if info:
+                            name = info.get("name") or None
+                            logo_url = info.get("url_logo") or None
+                            by_id[str(team_id)] = {
+                                "name": name,
+                                "logoUrl": logo_url,
+                                "tag": info.get("tag") or tag,
+                            }
+                            dirty = True
+                by_tag[low] = {"teamId": team_id, "name": name, "logoUrl": logo_url}
+                dirty = True
+                result[low] = {"teamTag": tag, "teamId": team_id, "name": name, "logoUrl": logo_url}
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+        if dirty:
+            _save_team_logo_cache()
+
+    return result
+
+
 app = FastAPI(title="Dota Ward Vision Query")
 
 
@@ -1066,6 +1389,21 @@ def create_ward_value_job(request: WardValueRequest) -> dict:
 @app.post("/api/teams/ward-comparison/jobs")
 def create_team_comparison_job(request: TeamComparisonRequest) -> dict:
     return create_job("team-comparison", comparison_job_runner, request)
+
+
+@app.post("/api/prewarm/jobs")
+def create_prewarm_job(request: PrewarmRequest) -> dict:
+    return create_job("prewarm", prewarm_job_runner, request)
+
+
+@app.get("/api/teams/logos")
+def team_logos(tags: str = Query(..., min_length=1)) -> dict:
+    tag_list = [t for t in (tags or "").split(",") if t.strip()]
+    if not tag_list:
+        raise HTTPException(status_code=400, detail="tags 不能为空")
+    if len(tag_list) > 24:
+        tag_list = tag_list[:24]
+    return {"logos": get_team_logos(tag_list)}
 
 
 @app.get("/api/matches")

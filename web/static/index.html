@@ -248,6 +248,30 @@
       gap: 10px;
       margin-top: 14px;
     }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .team-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      overflow: hidden;
+      vertical-align: middle;
+      background: rgba(255, 255, 255, 0.07);
+      color: #8497ab;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
+      margin-right: 6px;
+      flex: 0 0 auto;
+    }
+    .team-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .team-logo.lg { width: 30px; height: 30px; font-size: 11px; border-radius: 7px; }
     .metric {
       position: relative;
       overflow: hidden;
@@ -730,6 +754,7 @@
       <button data-section="details">明细与导出</button>
       <button data-section="roadmap">点位库与排行榜</button>
       <button data-section="compare">战队对比</button>
+      <button data-section="prewarm">预热计算</button>
     </nav>
 
     <section id="overview" class="section active">
@@ -805,6 +830,36 @@
       </div>
       <div id="compareContent" class="empty" style="margin-top:14px">添加至少两支战队后点击“计算对比”。</div>
     </section>
+
+    <section id="prewarm" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div>
+            <h2>预热计算</h2>
+            <div class="subtitle">提前指定几支战队，后台一次性把每支战队的“点位库与排行榜”和这批战队的“多战队眼位对比”都算好并写入缓存。之后在对应页面用相同战队与场数打开时会直接命中缓存、秒开。使用顶部的时间段设置。</div>
+          </div>
+        </div>
+        <div class="quick-row" style="margin-top:14px;border-top:none;padding-top:0">
+          <div style="min-width:260px;flex:1">
+            <label for="pwTeams">战队 Tag（逗号或空格分隔，2-12 支）</label>
+            <input id="pwTeams" placeholder="例如 KRD, Tundra, Spirit" />
+          </div>
+          <div style="width:140px">
+            <label for="pwRecent">每队最近场数</label>
+            <input id="pwRecent" type="number" min="1" max="50" value="10" />
+          </div>
+          <div class="actions" style="align-self:end">
+            <button id="pwRun" class="primary">开始预热</button>
+          </div>
+        </div>
+        <div class="pill-row" style="margin-top:10px">
+          <label class="muted"><input type="checkbox" id="pwIncludeWardValue" checked /> 点位库</label>
+          <label class="muted"><input type="checkbox" id="pwIncludeComparison" checked /> 多战队对比</label>
+          <label class="muted"><input type="checkbox" id="pwForceRefresh" /> 强制重算（忽略已有缓存）</label>
+        </div>
+      </div>
+      <div id="prewarmContent" class="empty" style="margin-top:14px">填入战队 Tag，点击“开始预热”。预热完成后可从结果卡片一键打开对应的点位库或对比。</div>
+    </section>
   </main>
 
   <script>
@@ -823,6 +878,8 @@
       playSpeed: 1,
       comparisonTeams: [],
       comparison: null,
+      prewarm: null,
+      teamLogos: new Map(),
     };
 
     const TEAM_PALETTE = ["#58b7ff", "#f4c95c", "#4cd08a", "#b79cff", "#f26a6a", "#2bd6e6"];
@@ -905,6 +962,13 @@
       cmpClear: document.getElementById("cmpClear"),
       cmpTeamChips: document.getElementById("cmpTeamChips"),
       compareContent: document.getElementById("compareContent"),
+      pwTeams: document.getElementById("pwTeams"),
+      pwRecent: document.getElementById("pwRecent"),
+      pwRun: document.getElementById("pwRun"),
+      pwIncludeWardValue: document.getElementById("pwIncludeWardValue"),
+      pwIncludeComparison: document.getElementById("pwIncludeComparison"),
+      pwForceRefresh: document.getElementById("pwForceRefresh"),
+      prewarmContent: document.getElementById("prewarmContent"),
     };
 
     function setStatus(message, isError = false) {
@@ -929,6 +993,49 @@
 
     function sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function teamLogoHtml(tag, big = false) {
+      const raw = String(tag || "").trim();
+      if (!raw) return "";
+      const low = raw.toLowerCase();
+      const initials = raw.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, "").slice(0, 2).toUpperCase() || raw.slice(0, 2).toUpperCase();
+      return `<span class="team-logo${big ? " lg" : ""}" data-team-logo="${low}" title="${raw.toUpperCase()}">${initials}</span>`;
+    }
+
+    async function hydrateTeamLogos() {
+      const nodes = [...document.querySelectorAll("[data-team-logo]")];
+      if (!nodes.length) return;
+      const tags = [...new Set(nodes.map(n => n.getAttribute("data-team-logo")).filter(Boolean))];
+      const missing = tags.filter(t => !state.teamLogos.has(t));
+      if (missing.length) {
+        try {
+          const payload = await api(`/api/teams/logos?tags=${encodeURIComponent(missing.join(","))}`);
+          const logos = payload.logos || {};
+          for (const t of missing) {
+            const info = logos[t];
+            state.teamLogos.set(t, info && info.logoUrl ? info : null);
+          }
+        } catch (error) {
+          for (const t of missing) {
+            if (!state.teamLogos.has(t)) state.teamLogos.set(t, null);
+          }
+        }
+      }
+      for (const node of nodes) {
+        const t = node.getAttribute("data-team-logo");
+        const info = state.teamLogos.get(t);
+        if (info && info.logoUrl && !node.querySelector("img")) {
+          const img = document.createElement("img");
+          img.src = info.logoUrl;
+          img.alt = String(info.name || t);
+          img.loading = "lazy";
+          img.addEventListener("error", () => { img.remove(); });
+          node.textContent = "";
+          node.appendChild(img);
+          if (info.name) node.title = info.name;
+        }
+      }
     }
 
     async function runJob(path, requestBody, statusText) {
@@ -1153,7 +1260,7 @@
         return `<label class="match-card">
           <input type="checkbox" data-match-id="${match.matchId}" ${checked} />
           <div>
-            <div class="match-title">${match.radiantTeamTag || "Radiant"} vs ${match.direTeamTag || "Dire"}</div>
+            <div class="match-title">${teamLogoHtml(match.radiantTeamTag)}${match.radiantTeamTag || "Radiant"} vs ${teamLogoHtml(match.direTeamTag)}${match.direTeamTag || "Dire"}</div>
             <div class="match-meta">
               Match ${match.matchId} · ${match.teamSide || "unknown"} · 对手 ${opponent || "未知"}<br />
               ${match.startDate || "未知日期"} · ${duration} · ${patch}<br />
@@ -1170,6 +1277,7 @@
           renderMatches();
         });
       }
+      hydrateTeamLogos();
     }
 
     function renderSearchOverview() {
@@ -2187,12 +2295,13 @@
       el.cmpTeamChips.innerHTML = state.comparisonTeams.map((team, index) => `
         <span class="team-chip ${index === 0 ? "focus" : ""}">
           <span class="swatch" style="color:${teamColor(index)};background:${teamColor(index)}"></span>
-          ${team.teamTag.toUpperCase()} <span class="muted">${team.matchIds.length} 场${index === 0 ? " · 分析对象" : ""}</span>
+          ${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()} <span class="muted">${team.matchIds.length} 场${index === 0 ? " · 分析对象" : ""}</span>
           <button class="chip-x" data-remove-team="${team.teamTag}">×</button>
         </span>`).join("");
       for (const button of el.cmpTeamChips.querySelectorAll("[data-remove-team]")) {
         button.addEventListener("click", () => removeCmpTeam(button.dataset.removeTeam));
       }
+      hydrateTeamLogos();
     }
 
     function removeCmpTeam(tag) {
@@ -2259,6 +2368,165 @@
       }
     }
 
+    async function runPrewarm() {
+      const raw = String(el.pwTeams.value || "").split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+      const teams = [...new Set(raw.map(s => s.toLowerCase()))].map(low => raw.find(s => s.toLowerCase() === low));
+      if (!teams.length) {
+        setStatus("请至少填写一支战队 Tag。", true);
+        return;
+      }
+      const recent = Math.max(1, Math.min(50, Number(el.pwRecent.value || 10)));
+      const window = selectedTimeWindow();
+      const includeWardValue = el.pwIncludeWardValue.checked;
+      const includeComparison = el.pwIncludeComparison.checked;
+      if (!includeWardValue && !includeComparison) {
+        setStatus("请至少勾选“点位库”或“多战队对比”其中一项。", true);
+        return;
+      }
+      el.pwRun.disabled = true;
+      el.prewarmContent.className = "";
+      el.prewarmContent.innerHTML = `<div class="panel"><div class="empty">正在预热 ${teams.length} 支战队，请稍候……大计算量可能需要几分钟，可以留在本页查看进度。</div></div>`;
+      setStatus(`正在预热 ${teams.length} 支战队...`);
+      try {
+        const report = await runJob("/api/prewarm", {
+          teams,
+          recent,
+          start: window.start,
+          end: window.end,
+          clusterEps: 200,
+          forceRefresh: el.pwForceRefresh.checked,
+          includeWardValue,
+          includeComparison,
+        }, `正在预热 ${teams.length} 支战队`);
+        state.prewarm = report;
+        renderPrewarm();
+        setStatus("预热完成，结果已写入缓存。");
+      } catch (error) {
+        setStatus(error.message, true);
+        el.prewarmContent.className = "empty";
+        el.prewarmContent.innerHTML = `预热失败：${error.message}`;
+      } finally {
+        el.pwRun.disabled = false;
+      }
+    }
+
+    function renderPrewarm() {
+      const report = state.prewarm;
+      if (!report) {
+        el.prewarmContent.className = "empty";
+        el.prewarmContent.innerHTML = "填入战队 Tag，点击“开始预热”。";
+        return;
+      }
+      el.prewarmContent.className = "";
+      const wv = report.wardValue || [];
+      const cmp = report.comparison;
+      const wvCards = wv.map(item => {
+        const tag = String(item.teamTag || "").toUpperCase();
+        if (item.status !== "ok") {
+          return `<div class="panel"><h3>${teamLogoHtml(item.teamTag, true)}${tag}</h3><div class="empty" style="margin-top:8px">${item.reason || "未计算"}</div></div>`;
+        }
+        const hit = item.cacheHit ? '<span class="pill">缓存命中</span>' : '<span class="pill">新算</span>';
+        return `<div class="panel">
+          <div class="toolbar"><h3>${teamLogoHtml(item.teamTag, true)}${tag} 点位库</h3>${hit}</div>
+          <div class="detail-list" style="margin-top:8px">
+            <div>比赛样本：<strong>${(item.matchIds || []).length}</strong> 场</div>
+            <div>聚类点位：<strong>${item.spotCount != null ? item.spotCount : "-"}</strong> 个</div>
+            <div>眼位实例：<strong>${item.instanceCount != null ? item.instanceCount : "-"}</strong> 个</div>
+          </div>
+          <div class="actions" style="margin-top:10px">
+            <button class="primary" data-pw-open-wv="${item.teamTag}">打开点位库</button>
+          </div>
+        </div>`;
+      }).join("");
+
+      let cmpCard = "";
+      if (cmp && cmp.status === "ok") {
+        const hit = cmp.cacheHit ? '<span class="pill">缓存命中</span>' : '<span class="pill">新算</span>';
+        const tags = (cmp.teams || []).map(t => `${teamLogoHtml(t.teamTag)}${String(t.teamTag).toUpperCase()}`).join(" vs ");
+        cmpCard = `<div class="panel">
+          <div class="toolbar"><h3>多战队对比</h3>${hit}</div>
+          <div class="detail-list" style="margin-top:8px">
+            <div>参与战队：<strong>${tags}</strong></div>
+            <div>分析对象：<strong>${String(cmp.focusTeam || "").toUpperCase()}</strong></div>
+            <div>共享点位：<strong>${cmp.spotCount != null ? cmp.spotCount : "-"}</strong> 个</div>
+          </div>
+          <div class="actions" style="margin-top:10px">
+            <button class="primary" data-pw-open-cmp="1">打开对比</button>
+          </div>
+        </div>`;
+      }
+
+      const params = report.params || {};
+      el.prewarmContent.innerHTML = `
+        <div class="panel">
+          <div class="subtitle">每队最近 ${params.recent} 场，聚类阈值 ${params.clusterEps}。以下结果已缓存，点击可直接打开（命中缓存秒开）。</div>
+        </div>
+        <div class="card-grid" style="margin-top:12px">${wvCards}${cmpCard}</div>`;
+
+      el.prewarmContent.querySelectorAll("[data-pw-open-wv]").forEach(btn => {
+        btn.addEventListener("click", () => openPrewarmedWardValue(btn.getAttribute("data-pw-open-wv")));
+      });
+      el.prewarmContent.querySelectorAll("[data-pw-open-cmp]").forEach(btn => {
+        btn.addEventListener("click", () => openPrewarmedComparison());
+      });
+      hydrateTeamLogos();
+    }
+
+    async function openPrewarmedWardValue(teamTag) {
+      const report = state.prewarm;
+      const team = ((report && report.teams) || []).find(t => t.teamTag === teamTag);
+      if (!team || !(team.matchIds || []).length) {
+        setStatus("找不到该战队的预热比赛。", true);
+        return;
+      }
+      const params = report.params || {};
+      setStatus(`正在打开 ${teamTag.toUpperCase()} 点位库...`);
+      try {
+        const wardValue = await runJob("/api/ward-value", {
+          teamTag,
+          matchIds: team.matchIds,
+          start: params.start ?? null,
+          end: params.end ?? null,
+          forceRefresh: false,
+          clusterEps: params.clusterEps || 200,
+        }, `正在打开 ${teamTag.toUpperCase()} 点位库`);
+        state.wardValue = wardValue;
+        renderWardValue();
+        showSection("roadmap");
+        setStatus(wardValue.cache && wardValue.cache.hit ? "点位库已从缓存读取。" : "点位库计算完成。");
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    async function openPrewarmedComparison() {
+      const report = state.prewarm;
+      const cmp = report && report.comparison;
+      if (!cmp || !(cmp.teams || []).length) {
+        setStatus("没有可打开的对比结果。", true);
+        return;
+      }
+      const params = report.params || {};
+      state.comparisonTeams = cmp.teams.map(t => ({ teamTag: t.teamTag, matchIds: t.matchIds }));
+      renderCmpChips();
+      setStatus("正在打开多战队对比...");
+      try {
+        const comparison = await runJob("/api/teams/ward-comparison", {
+          teams: cmp.teams.map(t => ({ teamTag: t.teamTag, matchIds: t.matchIds })),
+          start: params.start ?? null,
+          end: params.end ?? null,
+          forceRefresh: false,
+          clusterEps: params.clusterEps || 200,
+        }, "正在打开多战队对比");
+        state.comparison = comparison;
+        renderComparison();
+        showSection("compare");
+        setStatus(comparison.cache && comparison.cache.hit ? "对比已从缓存读取。" : "对比计算完成。");
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
     function diagnosisTable(title, rows, hint) {
       if (!rows.length) return `<div class="panel"><h3>${title}</h3><div class="empty" style="margin-top:10px">${hint}</div></div>`;
       const body = rows.slice(0, 12).map(row => `
@@ -2292,7 +2560,7 @@
 
       const summaryRows = teams.map((team, index) => `
         <tr>
-          <td><span class="dot" style="background:${teamColor(index)};color:${teamColor(index)}"></span>${team.teamTag.toUpperCase()}${index === 0 ? " <span class=\"muted\">(分析)</span>" : ""}</td>
+          <td><span class="dot" style="background:${teamColor(index)};color:${teamColor(index)}"></span>${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()}${index === 0 ? " <span class=\"muted\">(分析)</span>" : ""}</td>
           <td>${team.instanceCount}</td>
           <td>${team.observerCount}/${team.sentryCount}</td>
           <td>${team.spotCount}</td>
@@ -2399,6 +2667,7 @@
       for (const row of el.compareContent.querySelectorAll("[data-cmp-spot]")) {
         row.addEventListener("click", () => drawComparisonMap(row.dataset.cmpSpot));
       }
+      hydrateTeamLogos();
     }
 
     function dominantTeamIndex(spot, tags) {
@@ -2524,6 +2793,11 @@
       state.comparison = null;
       renderCmpChips();
       renderComparison();
+    });
+
+    el.pwRun.addEventListener("click", runPrewarm);
+    el.pwTeams.addEventListener("keydown", event => {
+      if (event.key === "Enter") runPrewarm();
     });
     el.cmpTeamTag.addEventListener("keydown", event => {
       if (event.key === "Enter") addCmpTeam();
