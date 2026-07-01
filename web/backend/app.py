@@ -462,6 +462,37 @@ def read_match_ward_cache(match_id: int, start: int | None, end: int | None) -> 
         return None
 
 
+# score_instances 需要、但 compact_instance 未保留的额外字段，单场缓存必须一并存下。
+_MATCH_SCORE_EXTRA_KEYS = ("uniqueInvisibleHeroesCovered", "antiInvisEfficiency", "fastDewarded60")
+
+
+def _serialize_match_instance(item: dict) -> dict:
+    """单场缓存序列化：compact_instance + score 所需的额外字段。"""
+    data = ward_value.compact_instance(item)
+    for key in _MATCH_SCORE_EXTRA_KEYS:
+        if key in item:
+            data[key] = item[key]
+    return data
+
+
+def _ensure_score_fields(item: dict) -> dict:
+    """兼容旧的残缺单场缓存：补齐 score_instances 所需字段，避免 KeyError。
+    antiInvisEfficiency / fastDewarded60 可从已有字段精确重建；
+    uniqueInvisibleHeroesCovered 无法从 compact 恢复，缺失时按 0 处理。"""
+    if item.get("fastDewarded60") is None:
+        life = item.get("lifetimeSeconds")
+        item["fastDewarded60"] = bool(
+            item.get("dewarded") is True and life is not None and life <= 60
+        )
+    if item.get("antiInvisEfficiency") is None:
+        opportunity = item.get("antiInvisOpportunitySeconds") or 0
+        true_sight = item.get("invisibleHeroTrueSightSeconds") or 0
+        item["antiInvisEfficiency"] = (true_sight / opportunity) if opportunity else 0.0
+    if item.get("uniqueInvisibleHeroesCovered") is None:
+        item["uniqueInvisibleHeroesCovered"] = 0
+    return item
+
+
 def write_match_ward_cache(match_id: int, start: int | None, end: int | None, match: dict) -> None:
     write_match_ward_cache_payload(
         match_id,
@@ -470,7 +501,7 @@ def write_match_ward_cache(match_id: int, start: int | None, end: int | None, ma
         {
             "invisibility": match.get("invisibility"),
             "timeWindow": match.get("timeWindow"),
-            "instances": [ward_value.compact_instance(item) for item in match.get("instances") or []],
+            "instances": [_serialize_match_instance(item) for item in match.get("instances") or []],
         },
     )
 
@@ -511,10 +542,10 @@ def _instance_dedupe_key(item: dict) -> tuple:
 
 
 def _strip_instance_for_match_cache(item: dict) -> dict:
-    compact = ward_value.compact_instance(item)
+    compact = _serialize_match_instance(item)
     for key in ("valueScore", "scoreBreakdown", "spotId"):
         compact.pop(key, None)
-    return compact
+    return _ensure_score_fields(compact)
 
 
 def extract_match_chunks_from_ward_value_report(report: dict) -> dict[int, dict]:
@@ -712,7 +743,7 @@ def load_or_compute_match_raw(
             "matchId": int(match_id),
             "invisibility": match.get("invisibility"),
             "timeWindow": match.get("timeWindow"),
-            "instances": [ward_value.compact_instance(item) for item in match.get("instances") or []],
+            "instances": [_serialize_match_instance(item) for item in match.get("instances") or []],
         }
         return fresh, False
 
@@ -851,7 +882,8 @@ def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
                     progress_callback=match_progress,
                 )
                 filtered_instances = [
-                    {**item} for item in (match_raw.get("instances") or [])
+                    _ensure_score_fields({**item})
+                    for item in (match_raw.get("instances") or [])
                     if item.get("team") == team_side
                 ]
                 match_summary = _ward_match_summary(match_raw, match_id, payload.teamTag, team_side)
@@ -859,7 +891,9 @@ def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
                 matches.append(match_summary)
                 all_instances.extend(filtered_instances)
 
-    invisibility_available = all(match["invisibility"]["available"] for match in matches) if matches else False
+    invisibility_available = all(
+        (match.get("invisibility") or {}).get("available", False) for match in matches
+    ) if matches else False
     if progress:
         progress({"phase": "scoring", "message": "正在评分和聚类点位", "percent": 96})
     ward_value.score_instances(all_instances, invisibility_available)
