@@ -81,6 +81,22 @@ fi
 . .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+
+# Persist cache dir: migrate from volatile /tmp to APP_DIR/var/web_cache.
+PERSIST_CACHE="$APP_DIR/var/web_cache"
+OLD_CACHE=/tmp/dota_vision_web_cache
+mkdir -p "$PERSIST_CACHE"
+if [ -d "$OLD_CACHE" ] && [ "$OLD_CACHE" != "$PERSIST_CACHE" ]; then
+  echo "==> Migrate cache from $OLD_CACHE to $PERSIST_CACHE"
+  cp -rn "$OLD_CACHE/." "$PERSIST_CACHE/" 2>/dev/null || true
+fi
+UNIT=/etc/systemd/system/dota2-vision.service
+if [ -f "$UNIT" ] && grep -q "DOTA_CACHE_ROOT=$OLD_CACHE" "$UNIT"; then
+  echo "==> Rewrite systemd DOTA_CACHE_ROOT -> $PERSIST_CACHE"
+  sed -i "s#DOTA_CACHE_ROOT=$OLD_CACHE#DOTA_CACHE_ROOT=$PERSIST_CACHE#" "$UNIT"
+  systemctl daemon-reload
+fi
+
 systemctl restart dota2-vision nginx
 sleep 2
 echo "==> Health"

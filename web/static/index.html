@@ -291,6 +291,34 @@
     .team-suggest .ts-meta { color: #7d8da0; font-size: 11px; margin-left: auto; white-space: nowrap; }
     .team-suggest .ts-tag { color: #8497ab; font-size: 11px; }
     .team-suggest .ts-empty { padding: 10px 12px; color: #7d8da0; font-size: 12px; }
+    .cmp-top-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .cmp-filters {
+      display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: end;
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+    }
+    .cmp-time-wrap { flex: 1 1 280px; min-width: 240px; }
+    .cmp-time-labels {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; color: #8497ab; margin-bottom: 6px;
+    }
+    .cmp-time-track { position: relative; height: 28px; }
+    .cmp-time-track input[type=range] {
+      position: absolute; left: 0; right: 0; width: 100%; margin: 0;
+      pointer-events: none; background: transparent; -webkit-appearance: none;
+    }
+    .cmp-time-track input[type=range]::-webkit-slider-thumb {
+      pointer-events: auto; -webkit-appearance: none; width: 14px; height: 14px;
+      border-radius: 50%; background: #58b7ff; border: 2px solid #fff; cursor: pointer;
+    }
+    .cmp-time-track input[type=range]::-moz-range-thumb {
+      pointer-events: auto; width: 14px; height: 14px; border-radius: 50%;
+      background: #58b7ff; border: 2px solid #fff; cursor: pointer;
+    }
     .metric {
       position: relative;
       overflow: hidden;
@@ -561,6 +589,30 @@
       border-radius: 6px; border: none; background: rgba(255,255,255,0.06); color: var(--muted);
     }
     .team-chip .chip-x:hover { background: rgba(242,106,106,0.25); color: #ffd0d0; box-shadow: none; }
+    .match-chip {
+      display: inline-flex; align-items: center;
+      padding: 3px 8px; margin: 3px 4px 3px 0;
+      border-radius: 6px; font-size: 11.5px; font-weight: 600;
+      border: 1px solid var(--line-soft); background: rgba(255,255,255,0.03);
+    }
+    .match-chip.computed {
+      border-color: rgba(76, 208, 138, 0.55);
+      color: #9ef0c4;
+      background: rgba(76, 208, 138, 0.1);
+    }
+    .match-chip.pending {
+      border-color: rgba(132, 151, 171, 0.45);
+      color: #8497ab;
+      background: rgba(132, 151, 171, 0.08);
+    }
+    .match-side-label {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+      color: var(--muted); margin: 10px 0 4px;
+    }
+    .match-side-label:first-child { margin-top: 0; }
+    .prewarm-detail-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; margin-top: 8px; }
+    .prewarm-detail-stats .ok { color: #9ef0c4; }
+    .prewarm-detail-stats .pending { color: #8497ab; }
     .board-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .board-tabs button {
       min-height: 32px;
@@ -827,7 +879,7 @@
         <div class="toolbar">
           <div>
             <h2>多战队眼位对比</h2>
-            <div class="subtitle">添加 2-6 支战队，每队自动取“最近 N 场天辉 + 最近 N 场夜魇”。所有战队的眼位会放进同一次聚类，从而在“同一个点位”上横向比较使用率、价值分与被排率。第一支战队作为分析对象，其余作为对比基准。可用上方阵营切换分别看天辉/夜魇。</div>
+            <div class="subtitle">添加 2-6 支战队，每队自动取「最近 N 场天辉 + 最近 N 场夜魇」。对比复用各队独立点位库，横向展示 KPI、Top 点位与地图叠加。可用上方阵营切换分别看天辉/夜魇。</div>
           </div>
         </div>
         <div class="quick-row" style="margin-top:14px;border-top:none;padding-top:0">
@@ -855,7 +907,7 @@
         <div class="toolbar">
           <div>
             <h2>预热计算</h2>
-            <div class="subtitle">先搜索并添加战队（确认能查到比赛后再加入列表），然后一次性把每支战队的“点位库与排行榜”和这批战队的“多战队眼位对比”都算好写入缓存。之后在对应页面用相同战队与场数打开会直接命中缓存、秒开。使用顶部的时间段设置。</div>
+            <div class="subtitle">先搜索并添加战队（确认能查到比赛后再加入列表），然后一次性把每支战队的“点位库与排行榜”和这批战队的“多战队眼位对比”都算好写入缓存。预热完成后会持久保存到服务器，其他人打开本页也能看到历史记录并一键打开。使用顶部的时间段设置。</div>
           </div>
         </div>
         <div class="quick-row" style="margin-top:14px;border-top:none;padding-top:0">
@@ -883,6 +935,7 @@
         </div>
       </div>
       <div id="prewarmContent" class="empty" style="margin-top:14px">填入战队 Tag，点击“开始预热”。预热完成后可从结果卡片一键打开对应的点位库或对比。</div>
+      <div id="prewarmHistory" style="margin-top:14px"></div>
     </section>
   </main>
 
@@ -904,9 +957,15 @@
       comparison: null,
       prewarm: null,
       prewarmTeams: [],
+      prewarmHistory: [],
+      prewarmExpanded: new Set(),
+      prewarmTeamDetails: new Map(),
       teamLogos: new Map(),
       wardValueSide: "all",
       comparisonSide: "all",
+      comparisonWardType: "all",
+      comparisonTimeRange: null,
+      comparisonTimeBounds: null,
     };
 
     const SIDE_LABEL = { all: "全部", radiant: "天辉", dire: "夜魇" };
@@ -1001,6 +1060,7 @@
       pwIncludeComparison: document.getElementById("pwIncludeComparison"),
       pwForceRefresh: document.getElementById("pwForceRefresh"),
       prewarmContent: document.getElementById("prewarmContent"),
+      prewarmHistory: document.getElementById("prewarmHistory"),
     };
 
     function setStatus(message, isError = false) {
@@ -1201,6 +1261,13 @@
       const sign = value < 0 ? "-" : "";
       const abs = Math.abs(value);
       return `${sign}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, "0")}`;
+    }
+
+    function fmtDateTime(iso) {
+      if (!iso) return "";
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return String(iso);
+      return date.toLocaleString("zh-CN", { hour12: false });
     }
 
     function cleanHeroName(name) {
@@ -2528,6 +2595,7 @@
           clusterEps: 200,
         }, `正在计算 ${state.comparisonTeams.length} 支战队的眼位对比`);
         state.comparison = report;
+        initComparisonFilters(report);
         renderComparison();
         showSection("compare");
         setStatus(report.cache && report.cache.hit ? "对比已从缓存读取。" : "对比计算完成，并已写入缓存。");
@@ -2646,6 +2714,7 @@
         }, `正在预热 ${teams.length} 支战队`);
         state.prewarm = report;
         renderPrewarm();
+        await loadPrewarmHistory();
         setStatus("预热完成，结果已写入缓存。");
       } catch (error) {
         setStatus(error.message, true);
@@ -2693,8 +2762,7 @@
           <div class="toolbar"><h3>多战队对比</h3>${hit}</div>
           <div class="detail-list" style="margin-top:8px">
             <div>参与战队：<strong>${tags}</strong></div>
-            <div>分析对象：<strong>${String(cmp.focusTeam || "").toUpperCase()}</strong></div>
-            <div>共享点位：<strong>${cmp.spotCount != null ? cmp.spotCount : "-"}</strong> 个</div>
+            <div>地图点位：<strong>${cmp.spotCount != null ? cmp.spotCount : "-"}</strong> 个</div>
           </div>
           <div class="actions" style="margin-top:10px">
             <button class="primary" data-pw-open-cmp="1">打开对比</button>
@@ -2703,8 +2771,10 @@
       }
 
       const params = report.params || {};
+      const meta = report.createdAt ? `<div class="subtitle">预热时间：${fmtDateTime(report.createdAt)}${report.recordId ? ` · 记录 #${report.recordId}` : ""}</div>` : "";
       el.prewarmContent.innerHTML = `
         <div class="panel">
+          ${meta}
           <div class="subtitle">每队最近 ${params.recent} 场，聚类阈值 ${params.clusterEps}。以下结果已缓存，点击可直接打开（命中缓存秒开）。</div>
         </div>
         <div class="card-grid" style="margin-top:12px">${wvCards}${cmpCard}</div>`;
@@ -2716,6 +2786,201 @@
         btn.addEventListener("click", () => openPrewarmedComparison());
       });
       hydrateTeamLogos();
+    }
+
+    async function loadPrewarmHistory() {
+      try {
+        const payload = await api("/api/prewarm/teams");
+        state.prewarmHistory = payload.teams || [];
+        renderPrewarmHistory();
+      } catch (error) {
+        if (el.prewarmHistory) {
+          el.prewarmHistory.innerHTML = `<div class="empty">已算好战队加载失败：${error.message}</div>`;
+        }
+      }
+    }
+
+    function matchChipHtml(match) {
+      const cls = match.computed ? "computed" : "pending";
+      const date = match.startDate ? String(match.startDate).slice(0, 10) : `#${match.matchId}`;
+      const vs = match.opponentTag ? ` vs ${match.opponentTag}` : "";
+      return `<span class="match-chip ${cls}" title="${match.matchId}${vs}">${date}</span>`;
+    }
+
+    function renderPrewarmTeamDetailBlock(teamTag) {
+      const detail = state.prewarmTeamDetails.get(String(teamTag).toLowerCase());
+      if (!detail) {
+        return `<div class="empty" style="margin-top:10px;font-size:12.5px">正在加载比赛详情…</div>`;
+      }
+      const radiant = (detail.matches || []).filter(item => item.teamSide === "radiant");
+      const dire = (detail.matches || []).filter(item => item.teamSide === "dire");
+      const pending = detail.pendingCount || 0;
+      return `
+        <div class="prewarm-detail-stats">
+          <span class="ok">已算 ${detail.computedCount || 0} 场</span>
+          <span class="pending">未算 ${pending} 场</span>
+          <span class="muted">当前池 天辉 ${detail.currentRadiantCount || 0} / 夜魇 ${detail.currentDireCount || 0}</span>
+        </div>
+        <div style="margin-top:10px">
+          <div class="match-side-label">天辉 (${radiant.length})</div>
+          <div>${radiant.map(matchChipHtml).join("") || `<span class="muted">无</span>`}</div>
+          <div class="match-side-label">夜魇 (${dire.length})</div>
+          <div>${dire.map(matchChipHtml).join("") || `<span class="muted">无</span>`}</div>
+        </div>
+        ${pending > 0 ? `<div class="actions" style="margin-top:10px"><button class="primary" data-pw-refresh-team="${teamTag}">补算 ${pending} 场新比赛</button></div>` : ""}`;
+    }
+
+    async function loadPrewarmTeamDetail(teamTag) {
+      const detail = await api(`/api/prewarm/teams/${encodeURIComponent(teamTag)}/detail`);
+      state.prewarmTeamDetails.set(String(teamTag).toLowerCase(), detail);
+      return detail;
+    }
+
+    async function togglePrewarmTeamDetail(teamTag) {
+      const key = String(teamTag).toLowerCase();
+      if (state.prewarmExpanded.has(key)) {
+        state.prewarmExpanded.delete(key);
+        renderPrewarmHistory();
+        return;
+      }
+      state.prewarmExpanded.add(key);
+      renderPrewarmHistory();
+      if (!state.prewarmTeamDetails.has(key)) {
+        try {
+          await loadPrewarmTeamDetail(teamTag);
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+        renderPrewarmHistory();
+      }
+    }
+
+    async function refreshPrewarmTeam(teamTag) {
+      setStatus(`正在补算 ${String(teamTag).toUpperCase()} 的新比赛…`);
+      try {
+        const detail = await runJob("/api/prewarm/teams/refresh/jobs", {
+          teamTag,
+          forceRefresh: false,
+        }, `正在补算 ${String(teamTag).toUpperCase()} 新比赛`);
+        state.prewarmTeamDetails.set(String(teamTag).toLowerCase(), detail);
+        const idx = (state.prewarmHistory || []).findIndex(
+          item => String(item.teamTag).toLowerCase() === String(teamTag).toLowerCase()
+        );
+        if (idx >= 0) {
+          state.prewarmHistory[idx] = {
+            ...state.prewarmHistory[idx],
+            matchIds: detail.currentMatchIds || detail.matchIds || [],
+            radiantCount: detail.currentRadiantCount ?? detail.radiantCount,
+            direCount: detail.currentDireCount ?? detail.direCount,
+            spotCount: detail.spotCount,
+            instanceCount: detail.instanceCount,
+            updatedAt: detail.updatedAt,
+          };
+        }
+        renderPrewarmHistory();
+        const refresh = detail.refresh || {};
+        const hits = refresh.matchCacheHits ?? "?";
+        const total = refresh.matchCount ?? "?";
+        setStatus(`补算完成。单场缓存复用 ${hits}/${total} 场，剩余未算 ${detail.pendingCount || 0} 场。`);
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    function renderPrewarmHistory() {
+      const teams = state.prewarmHistory || [];
+      if (!el.prewarmHistory) return;
+      if (!teams.length) {
+        el.prewarmHistory.innerHTML = `<div class="empty">暂无已算好的战队。完成一次预热后，这里会列出可直接打开的战队。</div>`;
+        return;
+      }
+      el.prewarmHistory.innerHTML = `
+        <div class="panel">
+          <h3>已算好的战队</h3>
+          <div class="subtitle">绿色=该场已计入单场缓存，灰色=尚未计算。战队持续比赛后场次会增加，点「补算」只算新场，旧场复用预热结果。</div>
+        </div>
+        <div class="card-grid" style="margin-top:12px">
+          ${teams.map(team => {
+            const key = String(team.teamTag).toLowerCase();
+            const expanded = state.prewarmExpanded.has(key);
+            const detail = state.prewarmTeamDetails.get(key);
+            const sideText = (team.radiantCount != null && team.direCount != null)
+              ? `天辉 ${team.radiantCount} / 夜魇 ${team.direCount} 场`
+              : `${(team.matchIds || []).length} 场`;
+            const parts = [`每侧 ${team.recent || "?"} 场`, sideText];
+            if (team.spotCount != null) parts.push(`${team.spotCount} 点位`);
+            const pendingBadge = detail && detail.pendingCount > 0
+              ? `<span class="muted"> · ${detail.pendingCount} 场待算</span>`
+              : "";
+            return `<div class="panel">
+              <div class="toolbar">
+                <h3>${teamLogoHtml(team.teamTag, true)}${String(team.teamTag).toUpperCase()}</h3>
+                <span class="muted">${fmtDateTime(team.updatedAt)}${pendingBadge}</span>
+              </div>
+              <div class="detail-list" style="margin-top:8px">
+                <div>${parts.join(" · ")}</div>
+              </div>
+              <div class="actions" style="margin-top:10px">
+                <button class="primary" data-pw-open-team="${team.teamTag}">打开点位库</button>
+                <button data-pw-toggle-detail="${team.teamTag}">${expanded ? "收起详情" : "展开详情"}</button>
+              </div>
+              ${expanded ? `<div class="prewarm-detail" style="margin-top:12px;border-top:1px solid var(--line-soft);padding-top:12px">${renderPrewarmTeamDetailBlock(team.teamTag)}</div>` : ""}
+            </div>`;
+          }).join("")}
+        </div>`;
+      el.prewarmHistory.querySelectorAll("[data-pw-open-team]").forEach(btn => {
+        btn.addEventListener("click", () => openPrewarmedTeam(btn.getAttribute("data-pw-open-team")));
+      });
+      el.prewarmHistory.querySelectorAll("[data-pw-toggle-detail]").forEach(btn => {
+        btn.addEventListener("click", () => togglePrewarmTeamDetail(btn.getAttribute("data-pw-toggle-detail")));
+      });
+      el.prewarmHistory.querySelectorAll("[data-pw-refresh-team]").forEach(btn => {
+        btn.addEventListener("click", () => refreshPrewarmTeam(btn.getAttribute("data-pw-refresh-team")));
+      });
+      hydrateTeamLogos();
+    }
+
+    async function openPrewarmedTeam(teamTag) {
+      let detail = state.prewarmTeamDetails.get(String(teamTag).toLowerCase());
+      if (!detail) {
+        try {
+          detail = await loadPrewarmTeamDetail(teamTag);
+        } catch (error) {
+          setStatus(error.message, true);
+          return;
+        }
+      }
+      const matchIds = detail.currentMatchIds || detail.matchIds || [];
+      if (!matchIds.length) {
+        setStatus("找不到该战队的预热比赛。", true);
+        return;
+      }
+      setStatus(`正在打开 ${String(teamTag).toUpperCase()} 点位库...`);
+      try {
+        const wardValue = await runJob("/api/ward-value", {
+          teamTag: detail.teamTag || teamTag,
+          matchIds,
+          start: detail.start ?? null,
+          end: detail.end ?? null,
+          forceRefresh: false,
+          clusterEps: detail.clusterEps || 200,
+        }, `正在打开 ${String(teamTag).toUpperCase()} 点位库`);
+        state.wardValue = wardValue;
+        renderWardValue();
+        showSection("roadmap");
+        const summary = wardValue.summary || {};
+        const hits = summary.matchCacheHits;
+        const total = summary.matchCount;
+        if (wardValue.cache && wardValue.cache.hit) {
+          setStatus("点位库已从战队缓存读取。");
+        } else if (hits != null && total) {
+          setStatus(`点位库计算完成（单场缓存复用 ${hits}/${total} 场）。`);
+        } else {
+          setStatus("点位库计算完成。");
+        }
+      } catch (error) {
+        setStatus(error.message, true);
+      }
     }
 
     async function openPrewarmedWardValue(teamTag) {
@@ -2765,12 +3030,268 @@
           clusterEps: params.clusterEps || 200,
         }, "正在打开多战队对比");
         state.comparison = comparison;
+        initComparisonFilters(comparison);
         renderComparison();
         showSection("compare");
         setStatus(comparison.cache && comparison.cache.hit ? "对比已从缓存读取。" : "对比计算完成。");
       } catch (error) {
         setStatus(error.message, true);
       }
+    }
+
+    function initComparisonFilters(report) {
+      const bounds = (report && report.source && report.source.timeBounds) || { min: 0, max: 3600 };
+      state.comparisonTimeBounds = bounds;
+      state.comparisonTimeRange = [bounds.min, bounds.max];
+      state.comparisonWardType = "all";
+    }
+
+    function cmpAllInstances() {
+      const report = state.comparison;
+      if (!report || !report.instancesByTeam) return [];
+      const tags = report.source.teamTags || [];
+      return tags.flatMap(tag => report.instancesByTeam[tag] || []);
+    }
+
+    function cmpFilteredInstances() {
+      const cmpSide = state.comparisonSide || "all";
+      const wardType = state.comparisonWardType || "all";
+      const range = state.comparisonTimeRange || [0, 999999];
+      const tMin = Math.min(range[0], range[1]);
+      const tMax = Math.max(range[0], range[1]);
+      return cmpAllInstances().filter(inst => {
+        if (cmpSide !== "all" && inst.team !== cmpSide) return false;
+        if (wardType !== "all" && inst.wardType !== wardType) return false;
+        const start = Number(inst.start);
+        if (Number.isFinite(start) && (start < tMin || start > tMax)) return false;
+        return true;
+      });
+    }
+
+    function cmpTeamSummaryFromInstances(teamTag, instances) {
+      const base = (state.comparison.teams || []).find(t => t.teamTag === teamTag) || {};
+      const teamInst = instances.filter(i => i.teamTag === teamTag);
+      const observers = teamInst.filter(i => i.wardType === "obs");
+      const sentries = teamInst.filter(i => i.wardType === "sen");
+      const dewardKnown = teamInst.filter(i => i.dewarded != null);
+      const spotIds = new Set(teamInst.map(i => i.spotId).filter(Boolean));
+      const count = teamInst.length;
+      const avg = (arr, key) => arr.length ? arr.reduce((s, i) => s + (Number(i[key]) || 0), 0) / arr.length : 0;
+      return {
+        teamTag,
+        matchCount: base.matchCount,
+        instanceCount: count,
+        observerCount: observers.length,
+        sentryCount: sentries.length,
+        spotCount: spotIds.size,
+        avgValueScore: count ? Math.round(avg(teamInst, "valueScore") * 100) / 100 : 0,
+        avgSeenSeconds: count ? Math.round(avg(teamInst, "enemyHeroSeenSeconds") * 100) / 100 : 0,
+        avgLifetimeSeconds: count ? Math.round(avg(teamInst, "lifetimeSeconds") * 100) / 100 : 0,
+        avgTrueSightSeconds: sentries.length ? Math.round(avg(sentries, "invisibleHeroTrueSightSeconds") * 100) / 100 : 0,
+        dewardRate: dewardKnown.length
+          ? Math.round(dewardKnown.filter(i => i.dewarded).length / dewardKnown.length * 10000) / 10000
+          : null,
+      };
+    }
+
+    function cmpTopSpotsForTeam(teamTag, instances, limit = 10) {
+      const bySpot = new Map();
+      for (const inst of instances.filter(i => i.teamTag === teamTag)) {
+        const sid = inst.spotId;
+        if (!sid) continue;
+        if (!bySpot.has(sid)) bySpot.set(sid, []);
+        bySpot.get(sid).push(inst);
+      }
+      const spots = [...bySpot.entries()].map(([spotId, members]) => {
+        const dewardKnown = members.filter(i => i.dewarded != null);
+        return {
+          spotId,
+          teamTag,
+          wardType: members[0].wardType,
+          team: members[0].team,
+          sampleCount: members.length,
+          avgScore: Math.round(members.reduce((s, i) => s + (Number(i.valueScore) || 0), 0) / members.length * 100) / 100,
+          dewardRate: dewardKnown.length
+            ? Math.round(dewardKnown.filter(i => i.dewarded).length / dewardKnown.length * 10000) / 10000
+            : null,
+          pixel: members[0].pixel,
+        };
+      });
+      return spots.sort((a, b) => (b.sampleCount - a.sampleCount) || ((b.avgScore || 0) - (a.avgScore || 0))).slice(0, limit);
+    }
+
+    function cmpMapSpotsFromInstances(instances) {
+      const byKey = new Map();
+      for (const inst of instances) {
+        const sid = inst.spotId;
+        if (!sid || !inst.pixel) continue;
+        const key = `${inst.teamTag}::${sid}`;
+        if (!byKey.has(key)) {
+          byKey.set(key, {
+            teamTag: inst.teamTag,
+            teamIndex: inst.teamIndex,
+            spotId: sid,
+            wardType: inst.wardType,
+            team: inst.team,
+            sampleCount: 0,
+            avgScore: 0,
+            pixel: inst.pixel,
+            _scores: [],
+          });
+        }
+        const entry = byKey.get(key);
+        entry.sampleCount += 1;
+        entry._scores.push(Number(inst.valueScore) || 0);
+      }
+      return [...byKey.values()].map(entry => ({
+        teamTag: entry.teamTag,
+        teamIndex: entry.teamIndex,
+        spotId: entry.spotId,
+        wardType: entry.wardType,
+        team: entry.team,
+        sampleCount: entry.sampleCount,
+        avgScore: entry._scores.length
+          ? Math.round(entry._scores.reduce((a, b) => a + b, 0) / entry._scores.length * 100) / 100
+          : 0,
+        pixel: entry.pixel,
+      }));
+    }
+
+    function bindComparisonFilters() {
+      const cmpSideSel = document.getElementById("cmpSideFilter");
+      if (cmpSideSel) {
+        cmpSideSel.value = state.comparisonSide || "all";
+        cmpSideSel.onchange = () => {
+          state.comparisonSide = cmpSideSel.value;
+          updateComparisonViews();
+        };
+      }
+      const wardSel = document.getElementById("cmpWardFilter");
+      if (wardSel) {
+        wardSel.value = state.comparisonWardType || "all";
+        wardSel.onchange = () => {
+          state.comparisonWardType = wardSel.value;
+          updateComparisonViews();
+        };
+      }
+      const bounds = state.comparisonTimeBounds || { min: 0, max: 3600 };
+      const range = state.comparisonTimeRange || [bounds.min, bounds.max];
+      const minEl = document.getElementById("cmpTimeMin");
+      const maxEl = document.getElementById("cmpTimeMax");
+      const minLabel = document.getElementById("cmpTimeMinLabel");
+      const maxLabel = document.getElementById("cmpTimeMaxLabel");
+      if (minEl && maxEl) {
+        minEl.min = maxEl.min = String(bounds.min);
+        minEl.max = maxEl.max = String(bounds.max);
+        minEl.value = String(Math.min(range[0], range[1]));
+        maxEl.value = String(Math.max(range[0], range[1]));
+        const sync = () => {
+          let lo = Number(minEl.value);
+          let hi = Number(maxEl.value);
+          if (lo > hi) {
+            if (document.activeElement === minEl) hi = lo;
+            else lo = hi;
+          }
+          state.comparisonTimeRange = [lo, hi];
+          if (minLabel) minLabel.textContent = fmtTime(lo);
+          if (maxLabel) maxLabel.textContent = fmtTime(hi);
+          updateComparisonViews();
+        };
+        minEl.oninput = sync;
+        maxEl.oninput = sync;
+        if (minLabel) minLabel.textContent = fmtTime(minEl.value);
+        if (maxLabel) maxLabel.textContent = fmtTime(maxEl.value);
+      }
+    }
+
+    function updateComparisonViews() {
+      const report = state.comparison;
+      if (!report) return;
+      const tags = report.source.teamTags || [];
+      const cmpSide = state.comparisonSide || "all";
+      const filtered = cmpFilteredInstances();
+      const teams = tags.map(tag => cmpTeamSummaryFromInstances(tag, filtered));
+      const topByTeam = Object.fromEntries(tags.map(tag => [tag, cmpTopSpotsForTeam(tag, filtered)]));
+      const mapSpots = cmpMapSpotsFromInstances(filtered);
+      const maxSpotCount = Math.max(1, ...teams.map(team => team.spotCount || 0));
+      const filteredCount = filtered.length;
+      const totalCount = cmpAllInstances().length;
+
+      const countEl = document.getElementById("cmpFilteredCount");
+      if (countEl) countEl.textContent = `筛选后 ${filteredCount} / ${totalCount} 颗眼`;
+
+      const summaryRows = teams.map((team, index) => `
+        <tr>
+          <td><span class="dot" style="background:${teamColor(index)};color:${teamColor(index)}"></span>${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()}</td>
+          <td>${team.matchCount ?? "-"}</td>
+          <td>${team.instanceCount}</td>
+          <td>${team.observerCount}/${team.sentryCount}</td>
+          <td>${team.spotCount}</td>
+          <td>${team.avgValueScore}</td>
+          <td>${team.avgSeenSeconds}s</td>
+          <td>${team.avgLifetimeSeconds}s</td>
+          <td>${team.dewardRate == null ? "-" : Math.round(team.dewardRate * 100) + "%"}</td>
+        </tr>`).join("");
+      const kpiBody = document.getElementById("cmpKpiBody");
+      if (kpiBody) kpiBody.innerHTML = summaryRows;
+
+      const radarIndicators = [
+        { name: "价值分", max: 100 },
+        { name: "平均可见", max: 100 },
+        { name: "平均存活", max: 100 },
+        { name: "存活率", max: 100 },
+        { name: "真视收益", max: 100 },
+        { name: "点位多样", max: 100 },
+      ];
+      const radarSeries = teams.map((team, index) => ({
+        name: team.teamTag.toUpperCase(),
+        color: teamColor(index),
+        values: [
+          Math.min(100, Math.round(team.avgValueScore || 0)),
+          Math.min(100, Math.round((team.avgSeenSeconds || 0) / 60 * 100)),
+          Math.min(100, Math.round((team.avgLifetimeSeconds || 0) / 240 * 100)),
+          Math.round((1 - (team.dewardRate == null ? 0 : team.dewardRate)) * 100),
+          Math.min(100, Math.round((team.avgTrueSightSeconds || 0) / 30 * 100)),
+          Math.round((team.spotCount || 0) / maxSpotCount * 100),
+        ],
+      }));
+      makeChart("compareRadar", radarMultiOption(radarIndicators, radarSeries));
+
+      const topGrid = document.getElementById("cmpTopGrid");
+      if (topGrid) {
+        topGrid.innerHTML = tags.map((tag, index) => {
+          const spots = topByTeam[tag] || [];
+          const rows = spots.length
+            ? spots.map(spot => `
+              <tr class="clickable" data-cmp-map-spot="${spot.spotId}" data-cmp-map-team="${tag}">
+                <td>${spot.spotId}<br><span class="muted">${spot.wardType} / ${spot.team}</span></td>
+                <td>${spot.sampleCount}</td>
+                <td>${spot.avgScore}</td>
+                <td>${spot.dewardRate == null ? "-" : Math.round(spot.dewardRate * 100) + "%"}</td>
+              </tr>`).join("")
+            : `<tr><td colspan="4" class="muted">暂无点位</td></tr>`;
+          return `<article class="panel">
+            <h3><span class="dot" style="color:${teamColor(index)};background:${teamColor(index)}"></span>${teamLogoHtml(tag)}${tag.toUpperCase()} Top 10</h3>
+            <div class="table-wrap" style="margin-top:8px"><table>
+              <thead><tr><th>点位</th><th>样本</th><th>均分</th><th>被排率</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table></div>
+          </article>`;
+        }).join("");
+        topGrid.querySelectorAll("[data-cmp-map-spot]").forEach(row => {
+          row.addEventListener("click", () => drawComparisonMap(row.dataset.cmpMapSpot, row.dataset.cmpMapTeam, mapSpots));
+        });
+      }
+
+      const legend = document.getElementById("compareMapLegend");
+      if (legend) {
+        legend.innerHTML = teams
+          .map((team, index) => `<span class="pill" style="color:${teamColor(index)}">${team.teamTag.toUpperCase()}</span>`)
+          .join("");
+      }
+      state._cmpMapSpotsFiltered = mapSpots;
+      drawComparisonMap(null, null, mapSpots);
+      hydrateTeamLogos();
     }
 
     function diagnosisTable(title, rows, hint) {
@@ -2794,167 +3315,93 @@
       const report = state.comparison;
       if (!report) {
         el.compareContent.className = "empty";
-        el.compareContent.innerHTML = "添加至少两支战队后点击“计算对比”。";
+        el.compareContent.innerHTML = "添加至少两支战队后点击「计算对比」。";
         return;
       }
-      const tags = report.source.teamTags || [];
-      const focus = report.source.focusTeam;
+      if (!state.comparisonTimeRange && report.source && report.source.timeBounds) {
+        initComparisonFilters(report);
+      }
       const cmpSide = state.comparisonSide || "all";
-      const cmpSideOk = t => cmpSide === "all" || t === cmpSide;
-      const teams = cmpSide === "all"
-        ? (report.teams || [])
-        : ((report.teamSideSummaries || {})[cmpSide] || report.teams || []);
-      const spots = (report.spots || []).filter(sp => cmpSideOk(sp.team));
-      const diagRaw = report.diagnostics || {};
-      const diag = {
-        signatureSpots: (diagRaw.signatureSpots || []).filter(x => cmpSideOk(x.team)),
-        overusedLowValueSpots: (diagRaw.overusedLowValueSpots || []).filter(x => cmpSideOk(x.team)),
-        underusedHighValueSpots: (diagRaw.underusedHighValueSpots || []).filter(x => cmpSideOk(x.team)),
-      };
-      const maxSpotCount = Math.max(1, ...teams.map(team => team.spotCount || 0));
-
-      const summaryRows = teams.map((team, index) => `
-        <tr>
-          <td><span class="dot" style="background:${teamColor(index)};color:${teamColor(index)}"></span>${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()}${index === 0 ? " <span class=\"muted\">(分析)</span>" : ""}</td>
-          <td>${team.instanceCount}</td>
-          <td>${team.observerCount}/${team.sentryCount}</td>
-          <td>${team.spotCount}</td>
-          <td>${team.avgValueScore}</td>
-          <td>${team.avgSeenSeconds}s</td>
-          <td>${team.avgLifetimeSeconds}s</td>
-          <td>${team.dewardRate == null ? "-" : Math.round(team.dewardRate * 100) + "%"}</td>
-        </tr>`).join("");
-
-      const radarIndicators = [
-        { name: "价值分", max: 100 },
-        { name: "平均可见", max: 100 },
-        { name: "平均存活", max: 100 },
-        { name: "存活率", max: 100 },
-        { name: "真视收益", max: 100 },
-        { name: "点位多样", max: 100 },
-      ];
-      const radarSeries = teams.map((team, index) => ({
-        name: team.teamTag.toUpperCase(),
-        color: teamColor(index),
-        values: [
-          Math.min(100, Math.round(team.avgValueScore || 0)),
-          Math.min(100, Math.round((team.avgSeenSeconds || 0) / 60 * 100)),
-          Math.min(100, Math.round((team.avgLifetimeSeconds || 0) / 240 * 100)),
-          Math.round((1 - (team.dewardRate == null ? 0 : team.dewardRate)) * 100),
-          Math.min(100, Math.round((team.avgTrueSightSeconds || 0) / 30 * 100)),
-          Math.round((team.spotCount || 0) / maxSpotCount * 100),
-        ],
-      }));
-
-      const topSpots = [...spots].sort((a, b) => (b.sampleCount || 0) - (a.sampleCount || 0)).slice(0, 40);
-      const spotHead = `<tr><th>点位</th><th>样本</th><th>均分</th>${tags.map(tag => `<th>${tag.toUpperCase()} 用量</th>`).join("")}</tr>`;
-      const spotBody = topSpots.map(spot => `
-        <tr class="clickable" data-cmp-spot="${spot.spotId}">
-          <td>${spot.spotId}<br><span class="muted">${spot.wardType} / ${spot.team}</span></td>
-          <td>${spot.sampleCount}</td>
-          <td>${spot.avgScore}</td>
-          ${tags.map(tag => {
-            const cell = spot.byTeam[tag] || {};
-            return `<td>${cell.placements || 0} <span class="muted">(${Math.round((cell.usageRate || 0) * 100)}%)</span></td>`;
-          }).join("")}
-        </tr>`).join("");
+      const hasInstances = report.instancesByTeam && Object.keys(report.instancesByTeam).length > 0;
 
       el.compareContent.className = "";
       el.compareContent.innerHTML = `
         <div class="panel">
           <div class="toolbar">
             <div>
-              <h2>对比结果${cmpSide === "all" ? "" : "（" + SIDE_LABEL[cmpSide] + "阵营）"}</h2>
-              <div class="subtitle">分析对象：<strong>${focus.toUpperCase()}</strong>，基准为其余战队。天辉/夜魇做眼逻辑不同，可切换阵营分别对比。</div>
+              <h2>横向对比结果${cmpSide === "all" ? "" : "（" + SIDE_LABEL[cmpSide] + "阵营）"}</h2>
+              <div class="subtitle">各队独立点位库横向并列。眼类型与下眼时间轴为前端实时筛选（按布置时间，指标仍为整场计算）。</div>
             </div>
-            <div class="actions">
+          </div>
+          <div class="pill-row" style="margin-top:10px">
+            <span class="pill">${report.summary.teamCount} 支战队</span>
+            <span class="pill" id="cmpFilteredCount">—</span>
+            <span class="pill">${report.source.invisibilityDataAvailable ? "隐身数据可用" : "隐身数据缺失"}</span>
+          </div>
+          <div class="cmp-filters">
+            <div>
               <label class="muted" for="cmpSideFilter">阵营</label>
-              <select id="cmpSideFilter" style="width:120px">
+              <select id="cmpSideFilter" style="width:120px;display:block;margin-top:4px">
                 <option value="all">全部</option>
                 <option value="radiant">天辉</option>
                 <option value="dire">夜魇</option>
               </select>
             </div>
+            <div>
+              <label class="muted" for="cmpWardFilter">眼类型</label>
+              <select id="cmpWardFilter" style="width:120px;display:block;margin-top:4px">
+                <option value="all">全部</option>
+                <option value="obs">仅真眼</option>
+                <option value="sen">仅假眼</option>
+              </select>
+            </div>
+            <div class="cmp-time-wrap">
+              <div class="cmp-time-labels">
+                <span id="cmpTimeMinLabel">0:00</span>
+                <span>下眼时间轴（布置时间）</span>
+                <span id="cmpTimeMaxLabel">60:00</span>
+              </div>
+              <div class="cmp-time-track">
+                <input id="cmpTimeMin" type="range" />
+                <input id="cmpTimeMax" type="range" />
+              </div>
+            </div>
           </div>
-          <div class="pill-row" style="margin-top:10px">
-            <span class="pill">${report.summary.teamCount} 支战队</span>
-            <span class="pill">${spots.length} 个共享点位</span>
-            <span class="pill">${report.source.invisibilityDataAvailable ? "隐身数据可用" : "隐身数据缺失"}</span>
-          </div>
-          <div class="viz-grid">
+          ${hasInstances ? "" : `<div class="empty" style="margin-top:10px">当前对比结果不含实例时间数据，请重新计算对比以启用时间轴筛选。</div>`}
+          <div class="viz-grid" style="margin-top:14px">
             <div class="panel" style="background:var(--surface-3)">
-              <h3>视野风格雷达对比</h3>
+              <h3>队级 KPI 雷达</h3>
               <div id="compareRadar" class="chart-box radar"></div>
             </div>
             <div class="panel" style="background:var(--surface-3);overflow:auto">
-              <h3>战队指标汇总</h3>
+              <h3>队级 KPI 表</h3>
               <div class="table-wrap" style="margin-top:8px"><table>
-                <thead><tr><th>战队</th><th>实例</th><th>Obs/Sen</th><th>点位</th><th>均分</th><th>可见</th><th>存活</th><th>被排率</th></tr></thead>
-                <tbody>${summaryRows}</tbody>
+                <thead><tr><th>战队</th><th>样本场</th><th>实例</th><th>Obs/Sen</th><th>点位</th><th>均分</th><th>可见</th><th>存活</th><th>被排率</th></tr></thead>
+                <tbody id="cmpKpiBody"></tbody>
               </table></div>
             </div>
           </div>
         </div>
+        <div class="cmp-top-grid" id="cmpTopGrid"></div>
         <div class="result-layout" style="margin-top:14px">
           <article class="panel map-card">
             <div class="map-head">
               <div>
-                <h2>共享点位地图</h2>
-                <div class="muted">每个点按“使用该点位最多的战队”着色，点大小代表总样本量。</div>
+                <h2>多队眼位叠加地图</h2>
+                <div class="muted">各队按颜色叠加，点大小代表筛选后该位置的样本量。</div>
               </div>
               <div class="pill-row" id="compareMapLegend"></div>
             </div>
             <div class="map-tip" id="compareTip"></div>
             <canvas class="map-canvas" id="compareMap" width="851" height="851"></canvas>
           </article>
-          <aside class="panel">
-            <h2>逐点位使用对比</h2>
-            <div class="table-wrap" style="margin-top:10px"><table>
-              <thead>${spotHead}</thead>
-              <tbody>${spotBody}</tbody>
-            </table></div>
-          </aside>
-        </div>
-        <div class="match-layout" style="margin-top:14px">
-          ${diagnosisTable(`${focus.toUpperCase()} 招牌点位`, diag.signatureSpots || [], "没有显著高于基准且有价值的点位。")}
-          ${diagnosisTable(`${focus.toUpperCase()} 高频低效点位`, diag.overusedLowValueSpots || [], "没有高频但低价值的点位。")}
-          ${diagnosisTable(`${focus.toUpperCase()} 高价值低使用点位`, diag.underusedHighValueSpots || [], "没有明显被低估的高价值点位。")}
-        </div>
-      `;
+        </div>`;
 
-      makeChart("compareRadar", radarMultiOption(radarIndicators, radarSeries));
-      el.compareContent.querySelector("#compareMapLegend").innerHTML = teams
-        .map((team, index) => `<span class="pill" style="color:${teamColor(index)}">${team.teamTag.toUpperCase()}</span>`)
-        .join("");
-      drawComparisonMap();
-      for (const row of el.compareContent.querySelectorAll("[data-cmp-spot]")) {
-        row.addEventListener("click", () => drawComparisonMap(row.dataset.cmpSpot));
-      }
-      const cmpSideSel = document.getElementById("cmpSideFilter");
-      if (cmpSideSel) {
-        cmpSideSel.value = cmpSide;
-        cmpSideSel.addEventListener("change", () => {
-          state.comparisonSide = cmpSideSel.value;
-          renderComparison();
-        });
-      }
-      hydrateTeamLogos();
+      bindComparisonFilters();
+      updateComparisonViews();
     }
 
-    function dominantTeamIndex(spot, tags) {
-      let bestIndex = -1;
-      let bestCount = 0;
-      tags.forEach((tag, index) => {
-        const count = (spot.byTeam[tag] || {}).placements || 0;
-        if (count > bestCount) {
-          bestCount = count;
-          bestIndex = index;
-        }
-      });
-      return bestIndex;
-    }
-
-    async function drawComparisonMap(selectedSpotId = null) {
+    async function drawComparisonMap(selectedSpotId = null, selectedTeamTag = null, mapSpotsOverride = null) {
       if (!state.comparison) return;
       try {
         await loadMapImage();
@@ -2972,27 +3419,26 @@
       const sx = canvas.width / 851;
       const sy = canvas.height / 851;
       const tags = state.comparison.source.teamTags || [];
-      const cmpSide = state.comparisonSide || "all";
-      const spots = (state.comparison.spots || []).filter(sp => cmpSide === "all" || sp.team === cmpSide);
+      const spots = mapSpotsOverride || state._cmpMapSpotsFiltered || [];
       for (const spot of spots) {
         if (!spot.pixel) continue;
         const x = spot.pixel.x * sx;
         const y = spot.pixel.y * sy;
-        const r = Math.max(4, Math.min(18, 4 + Math.sqrt(spot.sampleCount || 1) * 2));
-        const idx = dominantTeamIndex(spot, tags);
+        const r = Math.max(3, Math.min(16, 3 + Math.sqrt(spot.sampleCount || 1) * 1.6));
+        const idx = tags.findIndex(tag => tag.toLowerCase() === String(spot.teamTag || "").toLowerCase());
         const color = idx < 0 ? "rgba(150,160,175,0.7)" : teamColor(idx);
-        const isSelected = selectedSpotId === spot.spotId;
+        const isSelected = selectedSpotId === spot.spotId && (!selectedTeamTag || selectedTeamTag === spot.teamTag);
         ctx.save();
+        ctx.globalAlpha = isSelected ? 0.95 : 0.72;
         ctx.shadowColor = color;
-        ctx.shadowBlur = isSelected ? 22 : 10;
+        ctx.shadowBlur = isSelected ? 22 : 8;
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.82;
         ctx.fill();
         ctx.restore();
-        ctx.lineWidth = isSelected ? 4 : 1.5;
-        ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.85)";
+        ctx.lineWidth = isSelected ? 3.5 : 1.2;
+        ctx.strokeStyle = isSelected ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.75)";
         ctx.stroke();
       }
       const tip = document.getElementById("compareTip");
@@ -3011,14 +3457,13 @@
       };
       canvas.onmousemove = event => {
         const { best, bestD } = nearest(event);
-        if (tip && best && bestD < 24) {
+        if (tip && best && bestD < 22) {
           const rect = canvas.getBoundingClientRect();
           tip.style.left = `${event.clientX - rect.left}px`;
           tip.style.top = `${event.clientY - rect.top}px`;
           tip.style.display = "block";
-          tip.innerHTML = `<div class="tip-title">${best.spotId}</div>
-            <div class="tip-row">${best.wardType} / ${best.team} · 总样本 ${best.sampleCount} · 均分 ${best.avgScore}</div>
-            ${tags.map(tag => `<div class="tip-row">${tag.toUpperCase()}: ${(best.byTeam[tag] || {}).placements || 0} 次</div>`).join("")}`;
+          tip.innerHTML = `<div class="tip-title">${String(best.teamTag || "").toUpperCase()} · ${best.spotId}</div>
+            <div class="tip-row">${best.wardType} / ${best.team} · 样本 ${best.sampleCount} · 均分 ${best.avgScore}</div>`;
           canvas.style.cursor = "pointer";
         } else if (tip) {
           tip.style.display = "none";
@@ -3092,6 +3537,7 @@
 
     renderMatches();
     renderCmpChips();
+    loadPrewarmHistory();
   </script>
 </body>
 </html>

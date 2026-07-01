@@ -63,8 +63,9 @@ DEFAULT_DB = _env_or_config("DOTA_DB_DATABASE", "dota2_analysis")
 DEFAULT_OVERVIEW_DB = _env_or_config("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
 CACHE_VERSION = "ward-hero-visibility-v8"
 WARD_VALUE_CACHE_VERSION = "ward-value-v1"
-COMPARISON_CACHE_VERSION = "team-comparison-v2"
-DEFAULT_CACHE_ROOT = "/tmp/dota_vision_web_cache" if os.environ.get("DEPLOY_RUN_PORT") else str(PROJECT_ROOT / "outputs" / "web_cache")
+COMPARISON_CACHE_VERSION = "team-comparison-v4"
+# 缓存目录必须持久：/tmp 会在系统重启/清理时丢失全部单场缓存与预热历史。
+DEFAULT_CACHE_ROOT = str(PROJECT_ROOT / "var" / "web_cache") if os.environ.get("DEPLOY_RUN_PORT") else str(PROJECT_ROOT / "outputs" / "web_cache")
 CACHE_ROOT = Path(_env_or_config("DOTA_CACHE_ROOT", DEFAULT_CACHE_ROOT))
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=int(_env_or_config("DOTA_JOB_WORKERS", "2")))
 JOB_LOCK = Lock()
@@ -79,6 +80,14 @@ TEAM_DIRECTORY_CACHE_FILE = "team_directory.json"
 TEAM_DIRECTORY_LOCK = Lock()
 _TEAM_DIRECTORY_CACHE: dict | None = None
 TEAM_DIRECTORY_TTL = 24 * 3600
+
+PREWARM_HISTORY_FILE = "prewarm_history.json"
+PREWARMED_TEAMS_MANIFEST_FILE = "prewarmed_teams.json"
+PREWARM_HISTORY_LOCK = Lock()
+MAX_PREWARM_HISTORY = 30
+MATCH_WARD_CACHE_VERSION = "match-ward-v1"
+_MATCH_WARD_LOCKS: dict[str, Lock] = {}
+_MATCH_WARD_LOCKS_GUARD = Lock()
 
 
 class VisibilityRequest(BaseModel):
@@ -122,6 +131,11 @@ class PrewarmRequest(BaseModel):
     forceRefresh: bool = False
     includeWardValue: bool = True
     includeComparison: bool = True
+
+
+class RefreshPrewarmTeamRequest(BaseModel):
+    teamTag: str = Field(min_length=1)
+    forceRefresh: bool = False
 
 
 def db_config() -> dict:
@@ -400,6 +414,326 @@ def write_cached_ward_value_report(payload: WardValueRequest, report: dict) -> N
     temp_path.replace(path)
 
 
+def match_ward_cache_input(match_id: int, start: int | None, end: int | None) -> dict:
+    return {
+        "version": MATCH_WARD_CACHE_VERSION,
+        "matchId": int(match_id),
+        "start": start,
+        "end": end,
+    }
+
+
+def match_ward_cache_key(match_id: int, start: int | None, end: int | None) -> str:
+    raw = json.dumps(
+        match_ward_cache_input(match_id, start, end),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def match_ward_cache_path(match_id: int, start: int | None, end: int | None) -> Path:
+    return CACHE_ROOT / f"match_ward_{match_ward_cache_key(match_id, start, end)}.json"
+
+
+def match_ward_cache_exists(match_id: int, start: int | None, end: int | None) -> bool:
+    return match_ward_cache_path(match_id, start, end).exists()
+
+
+def _match_ward_lock(match_id: int, start: int | None, end: int | None) -> Lock:
+    """按单场缓存 key 取锁，避免多个任务并发计算同一场比赛。"""
+    key = match_ward_cache_key(match_id, start, end)
+    with _MATCH_WARD_LOCKS_GUARD:
+        lock = _MATCH_WARD_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _MATCH_WARD_LOCKS[key] = lock
+        return lock
+
+
+def read_match_ward_cache(match_id: int, start: int | None, end: int | None) -> dict | None:
+    path = match_ward_cache_path(match_id, start, end)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def write_match_ward_cache(match_id: int, start: int | None, end: int | None, match: dict) -> None:
+    write_match_ward_cache_payload(
+        match_id,
+        start,
+        end,
+        {
+            "invisibility": match.get("invisibility"),
+            "timeWindow": match.get("timeWindow"),
+            "instances": [ward_value.compact_instance(item) for item in match.get("instances") or []],
+        },
+    )
+
+
+def write_match_ward_cache_payload(
+    match_id: int,
+    start: int | None,
+    end: int | None,
+    chunk: dict,
+    *,
+    migrated_from: str | None = None,
+) -> None:
+    path = match_ward_cache_path(match_id, start, end)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "matchId": int(match_id),
+        "start": start,
+        "end": end,
+        "invisibility": chunk.get("invisibility") or {"available": False},
+        "timeWindow": chunk.get("timeWindow") or {},
+        "instances": chunk.get("instances") or [],
+        "computedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    if migrated_from:
+        payload["migratedFrom"] = migrated_from
+    temp_path = path.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _instance_dedupe_key(item: dict) -> tuple:
+    return (
+        int(item.get("matchId") or 0),
+        int(item.get("ehandle") or 0),
+        int(item.get("start") or 0),
+        str(item.get("team") or ""),
+    )
+
+
+def _strip_instance_for_match_cache(item: dict) -> dict:
+    compact = ward_value.compact_instance(item)
+    for key in ("valueScore", "scoreBreakdown", "spotId"):
+        compact.pop(key, None)
+    return compact
+
+
+def extract_match_chunks_from_ward_value_report(report: dict) -> dict[int, dict]:
+    match_meta = {
+        int(match["matchId"]): match
+        for match in (report.get("matches") or [])
+        if match.get("matchId") is not None
+    }
+    by_match: dict[int, list[dict]] = defaultdict(list)
+    for item in report.get("instances") or []:
+        match_id = int(item.get("matchId") or 0)
+        if match_id:
+            by_match[match_id].append(_strip_instance_for_match_cache(item))
+    chunks: dict[int, dict] = {}
+    for match_id, instances in by_match.items():
+        meta = match_meta.get(match_id, {})
+        chunks[match_id] = {
+            "invisibility": meta.get("invisibility") or {"available": False},
+            "timeWindow": meta.get("timeWindow") or {},
+            "instances": instances,
+        }
+    return chunks
+
+
+def _merge_match_ward_chunks(existing: dict | None, chunk: dict) -> dict:
+    merged: dict[tuple, dict] = {}
+    for item in (existing or {}).get("instances", []) + (chunk.get("instances") or []):
+        merged[_instance_dedupe_key(item)] = _strip_instance_for_match_cache(item)
+    existing_inv = (existing or {}).get("invisibility") or {}
+    chunk_inv = chunk.get("invisibility") or {}
+    invisibility = chunk_inv if chunk_inv.get("available") else existing_inv or {"available": False}
+    return {
+        "invisibility": invisibility,
+        "timeWindow": (existing or {}).get("timeWindow") or chunk.get("timeWindow") or {},
+        "instances": list(merged.values()),
+    }
+
+
+def iter_team_ward_value_report_paths() -> list[tuple[int | None, int | None, Path, str]]:
+    seen: set[str] = set()
+    results: list[tuple[int | None, int | None, Path, str]] = []
+
+    def add(start: int | None, end: int | None, path: Path, label: str) -> None:
+        key = str(path)
+        if key in seen or not path.exists():
+            return
+        seen.add(key)
+        results.append((start, end, path, label))
+
+    for team in list_prewarmed_teams():
+        match_ids = team.get("matchIds") or []
+        if not team.get("teamTag") or not match_ids:
+            continue
+        req = WardValueRequest(
+            teamTag=str(team["teamTag"]),
+            matchIds=[int(match_id) for match_id in match_ids],
+            start=team.get("start"),
+            end=team.get("end"),
+            clusterEps=float(team.get("clusterEps") or 200),
+        )
+        add(req.start, req.end, ward_value_cache_path_for(req), f"manifest:{team['teamTag']}")
+
+    for record in _load_prewarm_history().get("records", []):
+        params = record.get("params") or {}
+        teams = {t.get("teamTag"): t for t in (record.get("teams") or []) if t.get("teamTag")}
+        for item in record.get("wardValue") or []:
+            if item.get("status") != "ok":
+                continue
+            tag = item.get("teamTag")
+            if not tag:
+                continue
+            team_info = teams.get(tag) or {}
+            match_ids = item.get("matchIds") or team_info.get("matchIds") or []
+            if not match_ids:
+                continue
+            req = WardValueRequest(
+                teamTag=str(tag),
+                matchIds=[int(match_id) for match_id in match_ids],
+                start=params.get("start"),
+                end=params.get("end"),
+                clusterEps=float(params.get("clusterEps") or 200),
+            )
+            add(req.start, req.end, ward_value_cache_path_for(req), f"history:{tag}")
+
+    for path in sorted(CACHE_ROOT.glob("ward_value_*.json")):
+        add(None, None, path, "orphan")
+
+    return results
+
+
+def migrate_match_ward_cache_from_team_reports(*, dry_run: bool = False) -> dict:
+    """把现有战队整包 ward_value 缓存拆成单场 match_ward 缓存，供增量复用。"""
+    merged_pending: dict[tuple[int, int | None, int | None], dict] = {}
+    sources_scanned = 0
+    orphan_scanned = 0
+
+    for start, end, path, label in iter_team_ward_value_report_paths():
+        sources_scanned += 1
+        if label == "orphan":
+            orphan_scanned += 1
+        try:
+            report = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for match_id, chunk in extract_match_chunks_from_ward_value_report(report).items():
+            key = (match_id, start, end)
+            merged_pending[key] = _merge_match_ward_chunks(merged_pending.get(key), chunk)
+
+    created = 0
+    updated = 0
+    skipped = 0
+    details: list[dict] = []
+    for match_id, start, end in sorted(merged_pending.keys(), key=lambda item: (item[0], item[1] is not None, item[1] or 0, item[2] is not None, item[2] or 0)):
+        chunk = merged_pending[(match_id, start, end)]
+        existing = read_match_ward_cache(match_id, start, end)
+        before_count = len((existing or {}).get("instances") or [])
+        merged = _merge_match_ward_chunks(existing, chunk) if existing else chunk
+        after_count = len(merged.get("instances") or [])
+        if existing and after_count <= before_count:
+            skipped += 1
+            continue
+        action = "updated" if existing else "created"
+        if not dry_run:
+            write_match_ward_cache_payload(
+                match_id,
+                start,
+                end,
+                merged,
+                migrated_from="ward_value_split",
+            )
+        if existing:
+            updated += 1
+        else:
+            created += 1
+        if len(details) < 100:
+            details.append({
+                "matchId": match_id,
+                "start": start,
+                "end": end,
+                "instances": after_count,
+                "action": action,
+            })
+
+    manifest_bootstrapped = False
+    if not dry_run and not (_load_prewarmed_teams_manifest().get("teams") or {}):
+        for record in _load_prewarm_history().get("records", []):
+            _sync_manifest_from_prewarm_report(record)
+        manifest_bootstrapped = True
+
+    return {
+        "dryRun": dry_run,
+        "sourcesScanned": sources_scanned,
+        "orphanFilesScanned": orphan_scanned,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "totalMatches": len(merged_pending),
+        "manifestBootstrapped": manifest_bootstrapped,
+        "details": details,
+    }
+
+
+def load_or_compute_match_raw(
+    cursor,
+    match_id: int,
+    args,
+    grid,
+    cache,
+    tree_id_cells,
+    *,
+    force_refresh: bool = False,
+    progress_callback=None,
+) -> tuple[dict, bool]:
+    """加载或计算单场眼位原始数据（含双方 instances，评分前）。单场结果可跨战队复用。"""
+    if not force_refresh:
+        cached = read_match_ward_cache(match_id, args.start, args.end)
+        if cached is not None:
+            return cached, True
+    lock = _match_ward_lock(match_id, args.start, args.end)
+    with lock:
+        # double-check：等锁期间可能已有其他任务算完并写入缓存。
+        if not force_refresh:
+            cached = read_match_ward_cache(match_id, args.start, args.end)
+            if cached is not None:
+                return cached, True
+        match_args = SimpleNamespace(
+            **vars(args),
+            team_side_filter=None,
+            progress_callback=progress_callback,
+            progress_step=getattr(args, "progress_step", 15),
+        )
+        match = ward_value.compute_match(cursor, int(match_id), match_args, grid, cache, tree_id_cells)
+        write_match_ward_cache(match_id, args.start, args.end, match)
+        fresh = read_match_ward_cache(match_id, args.start, args.end) or {
+            "matchId": int(match_id),
+            "invisibility": match.get("invisibility"),
+            "timeWindow": match.get("timeWindow"),
+            "instances": [ward_value.compact_instance(item) for item in match.get("instances") or []],
+        }
+        return fresh, False
+
+
+def _ward_match_summary(match_raw: dict, match_id: int, team_tag: str, team_side: str) -> dict:
+    instances = match_raw.get("instances") or []
+    filtered = [item for item in instances if item.get("team") == team_side]
+    return {
+        "matchId": int(match_id),
+        "requestedTeamTag": team_tag,
+        "requestedTeamSide": team_side,
+        "invisibility": match_raw.get("invisibility") or {"available": False},
+        "timeWindow": match_raw.get("timeWindow") or {},
+        "wards": {
+            "total": len(filtered),
+            "observer": sum(1 for item in filtered if item.get("wardType") == "obs"),
+            "sentry": sum(1 for item in filtered if item.get("wardType") == "sen"),
+        },
+    }
+
+
 def visibility_report(payload: VisibilityRequest) -> dict:
     grid, cache = grid_and_cache()
     args = compute_args(payload.start, payload.end)
@@ -506,25 +840,22 @@ def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
                         "percent": percent,
                     })
 
-                match_args = SimpleNamespace(
-                    **vars(args),
-                    team_side_filter=team_side,
+                match_raw, cache_hit = load_or_compute_match_raw(
+                    cursor,
+                    int(match_id),
+                    args,
+                    grid,
+                    cache,
+                    tree_id_cells,
+                    force_refresh=payload.forceRefresh,
                     progress_callback=match_progress,
-                    progress_step=15,
                 )
-                match = ward_value.compute_match(cursor, int(match_id), match_args, grid, cache, tree_id_cells)
                 filtered_instances = [
-                    item for item in match["instances"]
+                    {**item} for item in (match_raw.get("instances") or [])
                     if item.get("team") == team_side
                 ]
-                match_summary = {key: value for key, value in match.items() if key != "instances"}
-                match_summary["requestedTeamTag"] = payload.teamTag
-                match_summary["requestedTeamSide"] = team_side
-                match_summary["wards"] = {
-                    "total": len(filtered_instances),
-                    "observer": sum(1 for item in filtered_instances if item["wardType"] == "obs"),
-                    "sentry": sum(1 for item in filtered_instances if item["wardType"] == "sen"),
-                }
+                match_summary = _ward_match_summary(match_raw, match_id, payload.teamTag, team_side)
+                match_summary["matchCacheHit"] = cache_hit
                 matches.append(match_summary)
                 all_instances.extend(filtered_instances)
 
@@ -560,6 +891,7 @@ def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
         "summary": {
             "matchCount": len(matches),
             "matches": [int(match_id) for match_id in payload.matchIds],
+            "matchCacheHits": sum(1 for item in matches if item.get("matchCacheHit")),
             "instanceCount": len(instances),
             "observerCount": sum(1 for item in instances if item["wardType"] == "obs"),
             "sentryCount": sum(1 for item in instances if item["wardType"] == "sen"),
@@ -689,10 +1021,7 @@ def ward_value_job_runner(payload: WardValueRequest, progress) -> dict:
 
 
 def comparison_job_runner(payload: TeamComparisonRequest, progress) -> dict:
-    progress({"phase": "computing", "message": "正在计算战队眼位对比"})
-    report = cached_team_comparison_report(payload)
-    progress({"phase": "finished", "message": "战队眼位对比计算完成", "percent": 100})
-    return report
+    return cached_team_comparison_report(payload, progress)
 
 
 def comparison_args(payload: TeamComparisonRequest) -> SimpleNamespace:
@@ -797,195 +1126,194 @@ def _team_summary(team_tag: str, instances: list[dict], spot_ids: set[str]) -> d
     }
 
 
-def team_comparison_report(payload: TeamComparisonRequest) -> dict:
-    grid, cache = grid_and_cache()
-    tree_id_cells = ward_value_tree_cells()
-    args = comparison_args(payload)
-    team_tags = [team.teamTag for team in payload.teams]
-    focus_tag = team_tags[0]
+def _summary_from_ward_value(team_tag: str, wv_report: dict, side: str | None = None) -> dict:
+    """从单队点位库报告提取 KPI；side 为 radiant/dire 时只统计该阵营。"""
+    instances = list(wv_report.get("instances") or [])
+    spots = list(wv_report.get("spots") or [])
+    if side in {"radiant", "dire"}:
+        instances = [item for item in instances if item.get("team") == side]
+        spots = [spot for spot in spots if spot.get("team") == side]
+    spot_ids = {str(spot.get("spotId")) for spot in spots if spot.get("spotId")}
+    summary = _team_summary(team_tag, instances, spot_ids)
+    wv_summary = wv_report.get("summary") or {}
+    summary["matchCount"] = wv_summary.get("matchCount")
+    if side in {"radiant", "dire"}:
+        summary["side"] = side
+    return summary
 
-    match_cache: dict[int, dict] = {}
-    all_instances: list[dict] = []
-    invis_flags: list[bool] = []
-    per_team_counts: dict[str, int] = {tag: 0 for tag in team_tags}
-    team_match_ids: dict[str, list[int]] = {}
 
-    with connect() as conn:
-        with conn.cursor() as cursor:
-            for team in payload.teams:
-                team_match_ids[team.teamTag] = [int(match_id) for match_id in team.matchIds]
-                for match_id in team.matchIds:
-                    key = int(match_id)
-                    if key not in match_cache:
-                        match_cache[key] = ward_value.compute_match(
-                            cursor, key, args, grid, cache, tree_id_cells
-                        )
-                    match = match_cache[key]
-                    side = resolve_team_side(match["matchInfo"], team.teamTag)
-                    invis_flags.append(bool(match["invisibility"]["available"]))
-                    for item in match["instances"]:
-                        if item.get("team") != side:
-                            continue
-                        clone = dict(item)
-                        clone["teamTag"] = team.teamTag
-                        clone["teamSide"] = side
-                        all_instances.append(clone)
-                        per_team_counts[team.teamTag] += 1
-
-    invisibility_available = all(invis_flags) if invis_flags else False
-    ward_value.score_instances(all_instances, invisibility_available)
-    instances = ward_value.finalize_instances(all_instances)
-    spots = ward_value.cluster_spots(instances, payload.clusterEps)
-    projection = ward_value.load_projection(Path(args.projection_calibration))
-    for spot in spots:
-        spot["pixel"] = ward_value.world_to_pixel(spot["centerWorldX"], spot["centerWorldY"], projection)
-
-    instances_by_spot: dict[str, list[dict]] = defaultdict(list)
-    for item in instances:
-        instances_by_spot[str(item.get("spotId"))].append(item)
-
-    team_spot_ids: dict[str, set[str]] = {tag: set() for tag in team_tags}
-    for item in instances:
-        team_spot_ids[item["teamTag"]].add(str(item.get("spotId")))
-
-    team_summaries = []
-    for tag in team_tags:
-        team_instances = [item for item in instances if item["teamTag"] == tag]
-        team_summaries.append(_team_summary(tag, team_instances, team_spot_ids[tag]))
-
-    # 按阵营（天辉/夜魇）分别汇总，供前端阵营筛选使用。
-    team_side_summaries: dict[str, list[dict]] = {"radiant": [], "dire": []}
-    for side in ("radiant", "dire"):
-        for tag in team_tags:
-            side_instances = [
-                item for item in instances
-                if item["teamTag"] == tag and item.get("team") == side
-            ]
-            side_spot_ids = {str(item.get("spotId")) for item in side_instances}
-            summary = _team_summary(tag, side_instances, side_spot_ids)
-            summary["side"] = side
-            team_side_summaries[side].append(summary)
-
-    spot_rows = []
-    for spot in spots:
-        members = instances_by_spot.get(spot["spotId"], [])
-        per_team = {}
-        for tag in team_tags:
-            team_members = [item for item in members if item["teamTag"] == tag]
-            deward_known = [item for item in team_members if item.get("dewarded") is not None]
-            per_team[tag] = {
-                "placements": len(team_members),
-                "usageRate": round(_safe_div(len(team_members), per_team_counts[tag]), 4),
-                "avgScore": round(
-                    _safe_div(sum(item["valueScore"] for item in team_members), len(team_members)), 2
-                )
-                if team_members
-                else None,
-                "avgSeenSeconds": round(
-                    _safe_div(sum(item["enemyHeroSeenSeconds"] for item in team_members), len(team_members)), 2
-                )
-                if team_members
-                else None,
-                "dewardRate": (
-                    round(_safe_div(sum(1 for item in deward_known if item["dewarded"]), len(deward_known)), 4)
-                    if deward_known
-                    else None
-                ),
-            }
-        usage_rates = [per_team[tag]["usageRate"] for tag in team_tags]
-        benchmark_usage = round(_safe_div(sum(usage_rates), len(usage_rates)), 4)
-        spot_rows.append(
-            {
-                "spotId": spot["spotId"],
-                "wardType": spot["wardType"],
-                "team": spot["team"],
-                "centerWorldX": spot["centerWorldX"],
-                "centerWorldY": spot["centerWorldY"],
-                "pixel": spot["pixel"],
-                "sampleCount": spot["sampleCount"],
-                "avgScore": spot["avgScore"],
-                "avgSeenSeconds": spot["avgSeenSeconds"],
-                "dewardRate": spot["dewardRate"],
-                "confidence": spot["confidence"],
-                "benchmarkUsageRate": benchmark_usage,
-                "byTeam": per_team,
-            }
-        )
-
-    focus_total = per_team_counts.get(focus_tag, 0)
-    other_tags = team_tags[1:]
-
-    def focus_usage(row: dict) -> float:
-        return row["byTeam"][focus_tag]["usageRate"]
-
-    def benchmark_usage_others(row: dict) -> float:
-        rates = [row["byTeam"][tag]["usageRate"] for tag in other_tags]
-        return _safe_div(sum(rates), len(rates))
-
-    signature_spots = []
-    overused_low_value = []
-    underused_high_value = []
-    for row in spot_rows:
-        focus_rate = focus_usage(row)
-        bench_rate = benchmark_usage_others(row)
-        diff = round(focus_rate - bench_rate, 4)
-        spot_score = row["avgScore"] or 0
-        entry = {
-            "spotId": row["spotId"],
-            "wardType": row["wardType"],
-            "team": row["team"],
-            "focusUsageRate": focus_rate,
-            "benchmarkUsageRate": round(bench_rate, 4),
-            "usageDiff": diff,
-            "avgScore": row["avgScore"],
-            "dewardRate": row["dewardRate"],
-            "sampleCount": row["sampleCount"],
+def _top_spots_from_ward_value(wv_report: dict, side: str | None = None, limit: int = 10) -> list[dict]:
+    spots = list(wv_report.get("spots") or [])
+    if side in {"radiant", "dire"}:
+        spots = [spot for spot in spots if spot.get("team") == side]
+    ranked = sorted(
+        spots,
+        key=lambda spot: (-int(spot.get("sampleCount") or 0), -(float(spot.get("avgScore") or 0))),
+    )
+    return [
+        {
+            "spotId": spot.get("spotId"),
+            "wardType": spot.get("wardType"),
+            "team": spot.get("team"),
+            "sampleCount": spot.get("sampleCount"),
+            "matchCount": spot.get("matchCount"),
+            "avgScore": spot.get("avgScore"),
+            "avgSeenSeconds": spot.get("avgSeenSeconds"),
+            "dewardRate": spot.get("dewardRate"),
+            "pixel": spot.get("pixel"),
+            "centerWorldX": spot.get("centerWorldX"),
+            "centerWorldY": spot.get("centerWorldY"),
         }
-        if focus_rate > 0 and diff >= 0.03 and spot_score >= 55:
-            signature_spots.append(entry)
-        if focus_rate > 0 and diff >= 0.03 and spot_score < 45:
-            overused_low_value.append(entry)
-        if focus_rate <= bench_rate - 0.03 and spot_score >= 60:
-            underused_high_value.append(entry)
+        for spot in ranked[:limit]
+    ]
 
-    signature_spots.sort(key=lambda item: -item["usageDiff"])
-    overused_low_value.sort(key=lambda item: (item["avgScore"] or 0, -item["usageDiff"]))
-    underused_high_value.sort(key=lambda item: (-(item["avgScore"] or 0), item["usageDiff"]))
+
+def _instances_by_team(ward_value_by_team: dict[str, dict], team_tags: list[str]) -> dict[str, list[dict]]:
+    """提取各队眼位实例（含布置时间 start），供前端按下眼时间/眼类型筛选。"""
+    spot_pixels: dict[tuple[str, str], dict] = {}
+    result: dict[str, list[dict]] = {}
+    for index, tag in enumerate(team_tags):
+        wv = ward_value_by_team[tag]
+        for spot in wv.get("spots") or []:
+            sid = spot.get("spotId")
+            if sid:
+                spot_pixels[(tag, str(sid))] = spot.get("pixel")
+        items: list[dict] = []
+        for inst in wv.get("instances") or []:
+            sid = inst.get("spotId")
+            items.append({
+                "teamTag": tag,
+                "teamIndex": index,
+                "wardType": inst.get("wardType"),
+                "team": inst.get("team"),
+                "start": inst.get("start"),
+                "spotId": sid,
+                "valueScore": inst.get("valueScore"),
+                "enemyHeroSeenSeconds": inst.get("enemyHeroSeenSeconds"),
+                "lifetimeSeconds": inst.get("lifetimeSeconds"),
+                "dewarded": inst.get("dewarded"),
+                "invisibleHeroTrueSightSeconds": inst.get("invisibleHeroTrueSightSeconds"),
+                "pixel": spot_pixels.get((tag, str(sid))) if sid else None,
+            })
+        result[tag] = items
+    return result
+
+
+def team_comparison_report(payload: TeamComparisonRequest, progress=None) -> dict:
+    """横向对比：复用各队独立点位库，汇总 KPI / Top 点位 / 地图叠加。"""
+    team_tags = [team.teamTag for team in payload.teams]
+    team_match_ids: dict[str, list[int]] = {}
+    ward_value_by_team: dict[str, dict] = {}
+    total = len(payload.teams)
+
+    for index, team in enumerate(payload.teams):
+        team_match_ids[team.teamTag] = [int(match_id) for match_id in team.matchIds]
+        if progress:
+            progress({
+                "phase": "team",
+                "message": f"加载 {team.teamTag.upper()} 点位库 ({index + 1}/{total})",
+                "percent": round(index / max(1, total) * 90, 1),
+                "currentTeam": index + 1,
+                "totalTeams": total,
+            })
+        wv_req = WardValueRequest(
+            teamTag=team.teamTag,
+            matchIds=team.matchIds,
+            start=payload.start,
+            end=payload.end,
+            forceRefresh=payload.forceRefresh,
+            clusterEps=payload.clusterEps,
+        )
+        ward_value_by_team[team.teamTag] = cached_ward_value_report(wv_req)
+
+    team_summaries = [_summary_from_ward_value(tag, ward_value_by_team[tag]) for tag in team_tags]
+    team_side_summaries: dict[str, list[dict]] = {
+        side: [_summary_from_ward_value(tag, ward_value_by_team[tag], side) for tag in team_tags]
+        for side in ("radiant", "dire")
+    }
+
+    top_spots_by_team = {
+        tag: [dict(spot, teamTag=tag) for spot in _top_spots_from_ward_value(ward_value_by_team[tag])]
+        for tag in team_tags
+    }
+    top_spots_by_team_side: dict[str, dict[str, list[dict]]] = {
+        side: {
+            tag: [dict(spot, teamTag=tag) for spot in _top_spots_from_ward_value(ward_value_by_team[tag], side)]
+            for tag in team_tags
+        }
+        for side in ("radiant", "dire")
+    }
+
+    map_spots: list[dict] = []
+    for team_index, tag in enumerate(team_tags):
+        for spot in ward_value_by_team[tag].get("spots") or []:
+            if not spot.get("pixel"):
+                continue
+            map_spots.append({
+                "teamTag": tag,
+                "teamIndex": team_index,
+                "spotId": spot.get("spotId"),
+                "wardType": spot.get("wardType"),
+                "team": spot.get("team"),
+                "sampleCount": spot.get("sampleCount"),
+                "avgScore": spot.get("avgScore"),
+                "pixel": spot.get("pixel"),
+            })
+
+    invisibility_available = all(
+        bool((ward_value_by_team[tag].get("summary") or {}).get("invisibilityDataAvailable"))
+        for tag in team_tags
+    )
+    instances_by_team = _instances_by_team(ward_value_by_team, team_tags)
+    all_starts = [
+        int(inst["start"])
+        for items in instances_by_team.values()
+        for inst in items
+        if inst.get("start") is not None
+    ]
+    time_bounds = (
+        {"min": min(all_starts), "max": max(all_starts)}
+        if all_starts
+        else {"min": 0, "max": 3600}
+    )
+    if progress:
+        progress({"phase": "finished", "message": "横向对比汇总完成", "percent": 100})
 
     return {
         "source": {
             "database": DEFAULT_DB,
-            "focusTeam": focus_tag,
+            "mode": "horizontal",
             "teamTags": team_tags,
             "teamMatchIds": team_match_ids,
             "map": map_config(),
             "mapVersion": ward_value.MAP_VERSION,
             "clusterEpsWorld": payload.clusterEps,
             "invisibilityDataAvailable": invisibility_available,
+            "timeBounds": time_bounds,
+            "timeFilterMode": "placement",
         },
         "summary": {
             "teamCount": len(team_tags),
-            "instanceCount": len(instances),
-            "spotCount": len(spots),
-            "focusTeam": focus_tag,
+            "mode": "horizontal",
+            "totalMapSpots": len(map_spots),
         },
         "teams": team_summaries,
         "teamSideSummaries": team_side_summaries,
-        "spots": spot_rows,
-        "diagnostics": {
-            "signatureSpots": signature_spots[:20],
-            "overusedLowValueSpots": overused_low_value[:20],
-            "underusedHighValueSpots": underused_high_value[:20],
-        },
+        "topSpotsByTeam": top_spots_by_team,
+        "topSpotsByTeamSide": top_spots_by_team_side,
+        "mapSpots": map_spots,
+        "instancesByTeam": instances_by_team,
     }
 
 
-def cached_team_comparison_report(payload: TeamComparisonRequest) -> dict:
+def cached_team_comparison_report(payload: TeamComparisonRequest, progress=None) -> dict:
     if not payload.forceRefresh:
         cached = read_cached_comparison_report(payload)
         if cached is not None:
+            if progress:
+                progress({"phase": "cache", "message": "已命中缓存", "percent": 100})
             return cached
-    report = team_comparison_report(payload)
+    report = team_comparison_report(payload, progress)
     write_cached_comparison_report(payload, report)
     return report
 
@@ -1185,15 +1513,14 @@ def prewarm_report(payload: PrewarmRequest, progress=None) -> dict:
             "teams": [{"teamTag": team["teamTag"], "matchIds": team["matchIds"]} for team in cmp_teams],
             "status": "ok",
             "cacheHit": bool((report.get("cache") or {}).get("hit")),
-            "spotCount": (report.get("summary") or {}).get("spotCount"),
-            "focusTeam": (report.get("summary") or {}).get("focusTeam"),
+            "spotCount": (report.get("summary") or {}).get("totalMapSpots"),
         }
         step_index += 1
 
     if progress:
         progress({"phase": "finished", "message": "预热完成", "percent": 100})
 
-    return {
+    report = {
         "params": {
             "recent": payload.recent,
             "start": payload.start,
@@ -1207,10 +1534,363 @@ def prewarm_report(payload: PrewarmRequest, progress=None) -> dict:
         "wardValue": ward_value_results,
         "comparison": comparison_result,
     }
+    saved = save_prewarm_record(report)
+    report["recordId"] = saved.get("id")
+    report["createdAt"] = saved.get("createdAt")
+    return report
 
 
 def prewarm_job_runner(payload: PrewarmRequest, progress) -> dict:
     return prewarm_report(payload, progress)
+
+
+def _prewarm_history_path() -> Path:
+    return CACHE_ROOT / PREWARM_HISTORY_FILE
+
+
+def _load_prewarm_history() -> dict:
+    path = _prewarm_history_path()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("records"), list):
+                return data
+        except Exception:
+            pass
+    return {"records": []}
+
+
+def _save_prewarm_history(data: dict) -> None:
+    path = _prewarm_history_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(path)
+    except Exception:
+        pass
+
+
+def _prewarm_signature(report: dict) -> str:
+    params = report.get("params") or {}
+    teams = report.get("teams") or []
+    team_keys = sorted(
+        f"{(t.get('teamTag') or '').lower()}:{t.get('teamId') or ''}"
+        for t in teams
+    )
+    payload = {
+        "teams": team_keys,
+        "recent": params.get("recent"),
+        "start": params.get("start"),
+        "end": params.get("end"),
+        "clusterEps": params.get("clusterEps"),
+        "includeWardValue": params.get("includeWardValue"),
+        "includeComparison": params.get("includeComparison"),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def save_prewarm_record(report: dict) -> dict:
+    """持久化预热结果，相同战队+参数组合会更新而非重复追加。"""
+    with PREWARM_HISTORY_LOCK:
+        data = _load_prewarm_history()
+        records: list[dict] = data["records"]
+        sig = _prewarm_signature(report)
+        record = {
+            "id": uuid.uuid4().hex[:12],
+            "signature": sig,
+            "createdAt": utc_now_iso(),
+            **report,
+        }
+        records = [r for r in records if r.get("signature") != sig]
+        records.insert(0, record)
+        data["records"] = records[:MAX_PREWARM_HISTORY]
+        _save_prewarm_history(data)
+        _sync_manifest_from_prewarm_report(report)
+        return record
+
+
+def _prewarmed_teams_manifest_path() -> Path:
+    return CACHE_ROOT / PREWARMED_TEAMS_MANIFEST_FILE
+
+
+def _load_prewarmed_teams_manifest() -> dict:
+    path = _prewarmed_teams_manifest_path()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                teams = data.get("teams")
+                if isinstance(teams, dict):
+                    return {"teams": teams}
+        except Exception:
+            pass
+    return {"teams": {}}
+
+
+def _save_prewarmed_teams_manifest(data: dict) -> None:
+    path = _prewarmed_teams_manifest_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(path)
+    except Exception:
+        pass
+
+
+def upsert_prewarmed_team_entry(entry: dict) -> None:
+    tag = (entry.get("teamTag") or "").strip()
+    if not tag:
+        return
+    with PREWARM_HISTORY_LOCK:
+        data = _load_prewarmed_teams_manifest()
+        data.setdefault("teams", {})[tag.lower()] = entry
+        _save_prewarmed_teams_manifest(data)
+
+
+def _sync_manifest_from_prewarm_report(report: dict) -> None:
+    params = report.get("params") or {}
+    teams_map = {t.get("teamTag"): t for t in (report.get("teams") or []) if t.get("teamTag")}
+    for item in report.get("wardValue") or []:
+        if item.get("status") != "ok":
+            continue
+        tag = item.get("teamTag")
+        if not tag:
+            continue
+        team_info = teams_map.get(tag) or {}
+        upsert_prewarmed_team_entry({
+            "teamTag": tag,
+            "teamId": team_info.get("teamId"),
+            "matchIds": item.get("matchIds") or team_info.get("matchIds") or [],
+            "radiantCount": team_info.get("radiantCount"),
+            "direCount": team_info.get("direCount"),
+            "recent": params.get("recent"),
+            "start": params.get("start"),
+            "end": params.get("end"),
+            "clusterEps": params.get("clusterEps"),
+            "spotCount": item.get("spotCount"),
+            "instanceCount": item.get("instanceCount"),
+            "updatedAt": utc_now_iso(),
+        })
+
+
+def _find_prewarmed_team_entry(team_tag: str) -> dict | None:
+    key = team_tag.strip().lower()
+    manifest = _load_prewarmed_teams_manifest()
+    entry = (manifest.get("teams") or {}).get(key)
+    if entry:
+        return entry
+    for item in list_prewarmed_teams_from_history():
+        if str(item.get("teamTag") or "").lower() == key:
+            return item
+    return None
+
+
+def fetch_match_overviews(cursor, match_ids: list[int]) -> dict[int, dict]:
+    if not match_ids:
+        return {}
+    placeholders = ",".join(["%s"] * len(match_ids))
+    query = f"""
+SELECT
+  CAST(mi.match_id AS BIGINT) AS matchId,
+  mi.radiant_team_tag AS radiantTeamTag,
+  mi.dire_team_tag AS direTeamTag,
+  ov.league_name AS leagueName,
+  ov.start_date AS startDate
+FROM match_info mi
+LEFT JOIN `{DEFAULT_OVERVIEW_DB}`.`dwd_match_overview` ov
+  ON CAST(mi.match_id AS BIGINT)=ov.match_id
+WHERE mi.match_id IN ({placeholders})
+"""
+    cursor.execute(query, match_ids)
+    result: dict[int, dict] = {}
+    for row in cursor.fetchall():
+        mid = int(row["matchId"])
+        if row.get("startDate") is not None:
+            row["startDate"] = str(row["startDate"])
+        result[mid] = row
+    return result
+
+
+def get_prewarm_team_detail(team_tag: str) -> dict:
+    entry = _find_prewarmed_team_entry(team_tag)
+    if not entry:
+        raise ValueError(f"找不到战队 {team_tag} 的预热记录")
+
+    recent = int(entry.get("recent") or 10)
+    start = entry.get("start")
+    end = entry.get("end")
+    team_id = entry.get("teamId")
+    stored_ids = {int(mid) for mid in (entry.get("matchIds") or [])}
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            sides = resolve_recent_matches_by_side(cursor, entry["teamTag"], recent, team_id)
+            overviews = fetch_match_overviews(cursor, sides["combined"])
+
+    matches: list[dict] = []
+    for side in ("radiant", "dire"):
+        for mid in sides[side]:
+            computed = match_ward_cache_exists(mid, start, end)
+            ov = overviews.get(mid, {})
+            opponent = ov.get("direTeamTag") if side == "radiant" else ov.get("radiantTeamTag")
+            matches.append({
+                "matchId": mid,
+                "teamSide": side,
+                "status": "computed" if computed else "pending",
+                "computed": computed,
+                "inStoredBatch": mid in stored_ids,
+                "startDate": ov.get("startDate"),
+                "leagueName": ov.get("leagueName"),
+                "opponentTag": opponent,
+            })
+
+    computed_count = sum(1 for item in matches if item["computed"])
+    pending_count = sum(1 for item in matches if not item["computed"])
+    return {
+        **entry,
+        "currentMatchIds": sides["combined"],
+        "currentRadiantCount": sides["radiantCount"],
+        "currentDireCount": sides["direCount"],
+        "computedCount": computed_count,
+        "pendingCount": pending_count,
+        "matches": matches,
+    }
+
+
+def refresh_prewarmed_team(payload: RefreshPrewarmTeamRequest, progress=None) -> dict:
+    entry = _find_prewarmed_team_entry(payload.teamTag)
+    if not entry:
+        raise ValueError(f"找不到战队 {payload.teamTag} 的预热记录")
+
+    recent = int(entry.get("recent") or 10)
+    start = entry.get("start")
+    end = entry.get("end")
+    team_id = entry.get("teamId")
+    cluster_eps = float(entry.get("clusterEps") or 200.0)
+    team_tag = entry["teamTag"]
+
+    if progress:
+        progress({"phase": "resolving", "message": "正在解析当前最近比赛", "percent": 5})
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            sides = resolve_recent_matches_by_side(cursor, team_tag, recent, team_id)
+
+    if not sides["combined"]:
+        raise ValueError(f"战队 {team_tag} 当前没有可用比赛")
+
+    if progress:
+        progress({"phase": "ward-value", "message": "正在增量计算点位库", "percent": 10})
+
+    wv_req = WardValueRequest(
+        teamTag=team_tag,
+        matchIds=sides["combined"],
+        start=start,
+        end=end,
+        forceRefresh=payload.forceRefresh,
+        clusterEps=cluster_eps,
+    )
+    report = cached_ward_value_report(wv_req, progress)
+    summary = report.get("summary") or {}
+    cache_meta = report.get("cache") or {}
+
+    upsert_prewarmed_team_entry({
+        "teamTag": team_tag,
+        "teamId": team_id,
+        "matchIds": sides["combined"],
+        "radiantCount": sides["radiantCount"],
+        "direCount": sides["direCount"],
+        "recent": recent,
+        "start": start,
+        "end": end,
+        "clusterEps": cluster_eps,
+        "spotCount": summary.get("spotCount"),
+        "instanceCount": summary.get("instanceCount"),
+        "updatedAt": utc_now_iso(),
+    })
+
+    detail = get_prewarm_team_detail(team_tag)
+    detail["refresh"] = {
+        "teamCacheHit": bool(cache_meta.get("hit")),
+        "matchCacheHits": summary.get("matchCacheHits"),
+        "matchCount": summary.get("matchCount"),
+    }
+    if progress:
+        progress({"phase": "finished", "message": "补算完成", "percent": 100})
+    return detail
+
+
+def refresh_prewarm_team_runner(payload: RefreshPrewarmTeamRequest, progress) -> dict:
+    return refresh_prewarmed_team(payload, progress)
+
+
+def summarize_prewarm_record(record: dict) -> dict:
+    teams = record.get("teams") or []
+    params = record.get("params") or {}
+    ward_value = record.get("wardValue") or []
+    comparison = record.get("comparison")
+    return {
+        "id": record.get("id"),
+        "createdAt": record.get("createdAt"),
+        "teamTags": [t.get("teamTag") for t in teams if t.get("teamTag")],
+        "teamIds": [t.get("teamId") for t in teams],
+        "recent": params.get("recent"),
+        "start": params.get("start"),
+        "end": params.get("end"),
+        "clusterEps": params.get("clusterEps"),
+        "wardValueOk": sum(1 for item in ward_value if item.get("status") == "ok"),
+        "hasComparison": bool(comparison and comparison.get("status") == "ok"),
+        "comparisonTeams": [
+            t.get("teamTag") for t in (comparison.get("teams") or []) if t.get("teamTag")
+        ] if comparison else [],
+    }
+
+
+def list_prewarmed_teams() -> list[dict]:
+    """已预热战队列表，优先读 manifest，否则从历史记录聚合。"""
+    manifest = _load_prewarmed_teams_manifest()
+    teams = list((manifest.get("teams") or {}).values())
+    if teams:
+        return sorted(teams, key=lambda e: str(e.get("updatedAt") or ""), reverse=True)
+    return list_prewarmed_teams_from_history()
+
+
+def list_prewarmed_teams_from_history() -> list[dict]:
+    """跨所有历史记录聚合「点位库已算好」的战队，同一队保留最新一次。"""
+    data = _load_prewarm_history()
+    by_team: dict[str, dict] = {}
+    for record in data.get("records", []):
+        params = record.get("params") or {}
+        teams = {t.get("teamTag"): t for t in (record.get("teams") or []) if t.get("teamTag")}
+        created_at = record.get("createdAt")
+        for item in record.get("wardValue") or []:
+            if item.get("status") != "ok":
+                continue
+            tag = item.get("teamTag")
+            if not tag:
+                continue
+            team_info = teams.get(tag) or {}
+            entry = {
+                "teamTag": tag,
+                "teamId": team_info.get("teamId"),
+                "matchIds": item.get("matchIds") or team_info.get("matchIds") or [],
+                "radiantCount": team_info.get("radiantCount"),
+                "direCount": team_info.get("direCount"),
+                "recent": params.get("recent"),
+                "start": params.get("start"),
+                "end": params.get("end"),
+                "clusterEps": params.get("clusterEps"),
+                "spotCount": item.get("spotCount"),
+                "instanceCount": item.get("instanceCount"),
+                "updatedAt": created_at,
+            }
+            key = tag.lower()
+            existing = by_team.get(key)
+            if existing is None or str(entry["updatedAt"] or "") > str(existing["updatedAt"] or ""):
+                by_team[key] = entry
+    return sorted(by_team.values(), key=lambda e: str(e["updatedAt"] or ""), reverse=True)
 
 
 def _team_logo_cache_path() -> Path:
@@ -1651,6 +2331,50 @@ def create_team_comparison_job(request: TeamComparisonRequest) -> dict:
 @app.post("/api/prewarm/jobs")
 def create_prewarm_job(request: PrewarmRequest) -> dict:
     return create_job("prewarm", prewarm_job_runner, request)
+
+
+@app.get("/api/prewarm/history")
+def prewarm_history_list(limit: int = Query(20, ge=1, le=50)) -> dict:
+    data = _load_prewarm_history()
+    records = data.get("records", [])[:limit]
+    return {"records": [summarize_prewarm_record(record) for record in records]}
+
+
+@app.get("/api/prewarm/teams")
+def prewarm_teams_list() -> dict:
+    return {"teams": list_prewarmed_teams()}
+
+
+@app.get("/api/prewarm/teams/{team_tag}/detail")
+def prewarm_team_detail(team_tag: str) -> dict:
+    try:
+        return get_prewarm_team_detail(team_tag)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except pymysql.MySQLError as exc:
+        raise HTTPException(status_code=500, detail=f"database query failed: {exc}") from exc
+
+
+@app.post("/api/prewarm/teams/refresh/jobs")
+def create_refresh_prewarm_team_job(request: RefreshPrewarmTeamRequest) -> dict:
+    return create_job("prewarm-refresh", refresh_prewarm_team_runner, request)
+
+
+@app.post("/api/prewarm/migrate-match-cache")
+def migrate_match_cache(dry_run: bool = Query(False)) -> dict:
+    try:
+        return migrate_match_ward_cache_from_team_reports(dry_run=dry_run)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/prewarm/history/{record_id}")
+def prewarm_history_detail(record_id: str) -> dict:
+    data = _load_prewarm_history()
+    for record in data.get("records", []):
+        if record.get("id") == record_id:
+            return record
+    raise HTTPException(status_code=404, detail="预热记录不存在")
 
 
 @app.get("/api/teams/search")
