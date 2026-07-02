@@ -148,7 +148,7 @@ class ComparisonTeam(BaseModel):
 
 
 class TeamComparisonRequest(BaseModel):
-    teams: list[ComparisonTeam] = Field(min_length=2, max_length=6)
+    teams: list[ComparisonTeam] = Field(min_length=2, max_length=20)
     start: int | None = None
     end: int | None = None
     forceRefresh: bool = False

@@ -947,7 +947,7 @@
         <div class="toolbar">
           <div>
             <h2>多战队眼位对比</h2>
-            <div class="subtitle">从下方已预热的战队里点击头像，选择 2-6 支进行对比（直接复用预热好的点位库）。想加入新战队？请先到「预热计算」把它算好。可用上方阵营切换分别看天辉/夜魇。</div>
+            <div class="subtitle">从下方已预热的战队里点击头像，选择 2-20 支进行对比（直接复用预热好的点位库）。想加入新战队？请先到「预热计算」把它算好。可用上方阵营切换分别看天辉/夜魇。</div>
           </div>
         </div>
         <div id="cmpTeamPicker" class="cmp-team-picker" style="margin-top:14px">加载已预热战队中…</div>
@@ -1051,6 +1051,9 @@
       aggregate: null,
       aggregateWardType: "all",
       aggregateSide: "all",
+      aggregateTimeRange: null,
+      aggregateTimeBounds: null,
+      aggregateSelectedSpotKey: null,
     };
 
     const SIDE_LABEL = { all: "全部", radiant: "天辉", dire: "夜魇" };
@@ -1163,6 +1166,26 @@
       el.status.className = isError ? "status error" : "status";
     }
 
+    function formatApiError(detail) {
+      if (detail == null) return "";
+      if (typeof detail === "string") return detail;
+      if (Array.isArray(detail)) {
+        return detail.map(item => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object") {
+            const loc = Array.isArray(item.loc) ? item.loc.filter(p => p !== "body").join(".") : "";
+            const msg = item.msg || item.message || "";
+            return loc && msg ? `${loc}: ${msg}` : (msg || JSON.stringify(item));
+          }
+          return String(item);
+        }).filter(Boolean).join("；");
+      }
+      if (typeof detail === "object") {
+        return detail.msg || detail.message || JSON.stringify(detail);
+      }
+      return String(detail);
+    }
+
     async function api(path, options = {}) {
       if (location.protocol === "file:") {
         throw new Error("当前是 file:// 打开方式，无法调用后端 API。请运行 uvicorn 后访问 http://127.0.0.1:8000/。");
@@ -1173,7 +1196,7 @@
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload.detail || `请求失败：${response.status}`);
+        throw new Error(formatApiError(payload.detail) || `请求失败：${response.status}`);
       }
       return payload;
     }
@@ -1352,7 +1375,7 @@
       details: "哪些英雄被看得最多、哪些眼贡献最大？支持导出 JSON/CSV。",
       roadmap: "这支队爱在哪做眼、哪些点位最值？看地图分布与点位排行。",
       compare: "几支战队的做眼风格差在哪？横向对比 KPI、点位与地图叠加。",
-      aggregate: "多支战队的眼位叠加在一起，密度热点在哪？绿=假眼、蓝=真眼分开看。",
+      aggregate: "多支战队的眼位叠加在一起，密度热点在哪？可按布置时间拖动筛选；绿=假眼、蓝=真眼分开看。",
       prewarm: "把战队提前算好写入缓存，之后秒开、也供他人直接查看。",
     };
 
@@ -2850,8 +2873,8 @@
         renderCmpChips();
         return;
       }
-      if (state.comparisonTeams.length >= 6) {
-        setStatus("最多对比 6 支战队。", true);
+      if (state.comparisonTeams.length >= 20) {
+        setStatus("最多对比 20 支战队。", true);
         return;
       }
       const entry = (state.prewarmHistory || []).find(team => String(team.teamTag).toLowerCase() === low);
@@ -3829,7 +3852,7 @@
       if (already) {
         state.aggregateTeams = state.aggregateTeams.filter(t => t.teamTag.toLowerCase() !== low);
       } else {
-        if (state.aggregateTeams.length >= 12) { setStatus("最多叠加 12 支战队。", true); return; }
+        if (state.aggregateTeams.length >= 20) { setStatus("最多聚合 20 支战队。", true); return; }
         const entry = (state.prewarmHistory || []).find(t => String(t.teamTag).toLowerCase() === low);
         if (!entry || !(entry.matchIds || []).length) { setStatus("该战队没有可用的预热比赛。", true); return; }
         state.aggregateTeams.push({ teamTag: entry.teamTag, teamId: entry.teamId || null, matchIds: entry.matchIds });
@@ -3876,6 +3899,8 @@
         state.aggregate = report;
         state.aggregateWardType = "all";
         state.aggregateSide = "all";
+        state.aggregateSelectedSpotKey = null;
+        initAggregateFilters(report);
         renderAggregate();
         showSection("aggregate");
         setStatus(report.cache && report.cache.hit ? "眼位聚合已从缓存读取。" : "眼位聚合完成。");
@@ -3893,33 +3918,83 @@
       return tags.flatMap(tag => report.instancesByTeam[tag] || []);
     }
 
+    function initAggregateFilters(report) {
+      const bounds = (report && report.source && report.source.timeBounds) || { min: 0, max: 3600 };
+      state.aggregateTimeBounds = bounds;
+      state.aggregateTimeRange = [bounds.min, bounds.max];
+    }
+
+    function aggFilteredInstances() {
+      const wardType = state.aggregateWardType || "all";
+      const side = state.aggregateSide || "all";
+      const range = state.aggregateTimeRange || [0, 999999];
+      const tMin = Math.min(range[0], range[1]);
+      const tMax = Math.max(range[0], range[1]);
+      return aggAllInstances().filter(inst => {
+        if (side !== "all" && inst.team !== side) return false;
+        if (wardType !== "all" && inst.wardType !== wardType) return false;
+        const start = Number(inst.start);
+        if (Number.isFinite(start) && (start < tMin || start > tMax)) return false;
+        return true;
+      });
+    }
+
     // 跨所有选中战队，把地理相近的下眼按「眼类型 + 粗网格」合并，得到密度点。
-    function aggregateWardSpots(instances, wardType, side, cell = 14) {
+    function aggregateWardSpots(instances, cell = 14) {
       const buckets = new Map();
       for (const inst of instances) {
         if (!inst.pixel) continue;
-        if (wardType !== "all" && inst.wardType !== wardType) continue;
-        if (side !== "all" && inst.team !== side) continue;
         const gx = Math.round(inst.pixel.x / cell);
         const gy = Math.round(inst.pixel.y / cell);
         const key = `${inst.wardType}:${gx}:${gy}`;
         let bucket = buckets.get(key);
         if (!bucket) {
-          bucket = { wardType: inst.wardType, sumX: 0, sumY: 0, count: 0, scoreSum: 0, teams: new Set() };
+          bucket = {
+            spotKey: key,
+            wardType: inst.wardType,
+            sumX: 0,
+            sumY: 0,
+            count: 0,
+            scoreSum: 0,
+            seenSum: 0,
+            lifeSum: 0,
+            trueSightSum: 0,
+            dewardKnown: 0,
+            dewarded: 0,
+            teams: new Set(),
+            members: [],
+          };
           buckets.set(key, bucket);
         }
         bucket.sumX += inst.pixel.x;
         bucket.sumY += inst.pixel.y;
         bucket.count += 1;
         bucket.scoreSum += Number(inst.valueScore) || 0;
+        bucket.seenSum += Number(inst.enemyHeroSeenSeconds) || 0;
+        bucket.lifeSum += Number(inst.lifetimeSeconds) || 0;
+        bucket.trueSightSum += Number(inst.invisibleHeroTrueSightSeconds) || 0;
+        if (inst.dewarded != null) {
+          bucket.dewardKnown += 1;
+          if (inst.dewarded) bucket.dewarded += 1;
+        }
         bucket.teams.add(inst.teamTag);
+        bucket.members.push(inst);
       }
       return [...buckets.values()].map(bucket => ({
+        spotKey: bucket.spotKey,
         wardType: bucket.wardType,
         pixel: { x: bucket.sumX / bucket.count, y: bucket.sumY / bucket.count },
         count: bucket.count,
         avgScore: Math.round(bucket.scoreSum / bucket.count * 100) / 100,
+        avgSeenSeconds: Math.round(bucket.seenSum / bucket.count * 100) / 100,
+        avgLifetimeSeconds: Math.round(bucket.lifeSum / bucket.count * 100) / 100,
+        avgTrueSightSeconds: Math.round(bucket.trueSightSum / bucket.count * 100) / 100,
+        dewardRate: bucket.dewardKnown
+          ? Math.round(bucket.dewarded / bucket.dewardKnown * 10000) / 10000
+          : null,
         teamCount: bucket.teams.size,
+        teamTags: [...bucket.teams],
+        members: bucket.members,
       }));
     }
 
@@ -3931,13 +4006,14 @@
         return;
       }
       const tags = (report.source && report.source.teamTags) || [];
+      const hasInstances = report.instancesByTeam && Object.keys(report.instancesByTeam).length > 0;
       el.aggregateContent.className = "";
       el.aggregateContent.innerHTML = `
         <div class="panel">
           <div class="toolbar">
             <div>
               <h2>眼位聚合地图</h2>
-              <div class="subtitle">${tags.length} 支战队眼位叠加。点越大表示该位置被布眼次数越多；<span style="color:#4cd08a">绿=假眼</span>、<span style="color:#58b7ff">蓝=真眼</span>。</div>
+              <div class="subtitle">${tags.length} 支战队眼位叠加。点大小=布眼次数，<strong>亮度/金色外圈=均分高</strong>；<span style="color:#4cd08a">绿=假眼</span>、<span style="color:#58b7ff">蓝=真眼</span>。点击地图或右侧列表查看详细参数。</div>
             </div>
             <div class="pill-row" id="aggSummary"></div>
           </div>
@@ -3958,11 +4034,24 @@
                 <option value="sen">仅真眼</option>
               </select>
             </div>
+            <div class="cmp-time-wrap">
+              <div class="cmp-time-labels">
+                <span id="aggTimeMinLabel">0:00</span>
+                <span>下眼时间轴（布置时间）</span>
+                <span id="aggTimeMaxLabel">60:00</span>
+              </div>
+              <div class="cmp-time-track">
+                <input id="aggTimeMin" type="range" />
+                <input id="aggTimeMax" type="range" />
+              </div>
+            </div>
             <div class="pill-row" style="align-self:end">
               <span class="pill" style="color:#4cd08a">● 假眼 Observer</span>
               <span class="pill" style="color:#58b7ff">● 真眼 Sentry</span>
+              <span class="pill" style="color:#f4c95c">◌ 高均分</span>
             </div>
           </div>
+          ${hasInstances ? "" : `<div class="empty" style="margin-top:10px">当前结果不含实例时间数据，请重新聚合以启用时间轴筛选。</div>`}
           <div class="pill-row" style="margin-top:8px">${tags.map(t => `<span class="pill">${teamLogoHtml(t)}${t.toUpperCase()}</span>`).join("")}</div>
         </div>
         <div class="result-layout" style="margin-top:14px">
@@ -3970,66 +4059,182 @@
             <div class="map-tip" id="aggTip"></div>
             <canvas class="map-canvas" id="aggregateMap" width="851" height="851"></canvas>
           </article>
-          <article class="panel" style="overflow:auto">
-            <h3>高频眼位 Top</h3>
+          <aside class="panel" style="overflow:auto;max-height:920px">
+            <h3 id="aggDetailTitle">聚合点位详情</h3>
+            <div id="aggSpotDetail" class="empty" style="margin-top:10px">点击地图上的点或下方列表，查看该位置每一颗眼的详细参数。</div>
+            <h3 style="margin-top:16px">高频眼位 Top</h3>
             <div class="subtitle" style="margin-top:4px">跨所选战队合并后，最常被布置的位置。</div>
             <div id="aggTopTable" class="table-wrap" style="margin-top:8px"></div>
-          </article>
+          </aside>
         </div>`;
 
-      const sideSel = document.getElementById("aggSideFilter");
-      const wardSel = document.getElementById("aggWardFilter");
-      if (sideSel) {
-        sideSel.value = state.aggregateSide || "all";
-        sideSel.onchange = () => { state.aggregateSide = sideSel.value; updateAggregateViews(); };
-      }
-      if (wardSel) {
-        wardSel.value = state.aggregateWardType || "all";
-        wardSel.onchange = () => { state.aggregateWardType = wardSel.value; updateAggregateViews(); };
-      }
-
+      bindAggregateFilters();
       updateAggregateViews();
       hydrateTeamLogos();
+    }
+
+    function bindAggregateFilters() {
+      const sideSel = document.getElementById("aggSideFilter");
+      if (sideSel) {
+        sideSel.value = state.aggregateSide || "all";
+        sideSel.onchange = () => {
+          state.aggregateSide = sideSel.value;
+          state.aggregateSelectedSpotKey = null;
+          scheduleAggregateUpdate();
+        };
+      }
+      const wardSel = document.getElementById("aggWardFilter");
+      if (wardSel) {
+        wardSel.value = state.aggregateWardType || "all";
+        wardSel.onchange = () => {
+          state.aggregateWardType = wardSel.value;
+          state.aggregateSelectedSpotKey = null;
+          scheduleAggregateUpdate();
+        };
+      }
+      const bounds = state.aggregateTimeBounds || { min: 0, max: 3600 };
+      const range = state.aggregateTimeRange || [bounds.min, bounds.max];
+      const minEl = document.getElementById("aggTimeMin");
+      const maxEl = document.getElementById("aggTimeMax");
+      const minLabel = document.getElementById("aggTimeMinLabel");
+      const maxLabel = document.getElementById("aggTimeMaxLabel");
+      if (minEl && maxEl) {
+        minEl.min = maxEl.min = String(bounds.min);
+        minEl.max = maxEl.max = String(bounds.max);
+        minEl.value = String(Math.min(range[0], range[1]));
+        maxEl.value = String(Math.max(range[0], range[1]));
+        const sync = () => {
+          let lo = Number(minEl.value);
+          let hi = Number(maxEl.value);
+          if (lo > hi) {
+            if (document.activeElement === minEl) hi = lo;
+            else lo = hi;
+          }
+          state.aggregateTimeRange = [lo, hi];
+          if (minLabel) minLabel.textContent = fmtTime(lo);
+          if (maxLabel) maxLabel.textContent = fmtTime(hi);
+          state.aggregateSelectedSpotKey = null;
+          scheduleAggregateUpdate();
+        };
+        minEl.oninput = sync;
+        maxEl.oninput = sync;
+        if (minLabel) minLabel.textContent = fmtTime(minEl.value);
+        if (maxLabel) maxLabel.textContent = fmtTime(maxEl.value);
+      }
+    }
+
+    let _aggUpdateRaf = 0;
+    function scheduleAggregateUpdate() {
+      if (_aggUpdateRaf) return;
+      _aggUpdateRaf = requestAnimationFrame(() => {
+        _aggUpdateRaf = 0;
+        updateAggregateViews();
+      });
+    }
+
+    function renderAggSpotDetail(spot) {
+      const detail = document.getElementById("aggSpotDetail");
+      const title = document.getElementById("aggDetailTitle");
+      if (!detail || !spot) return;
+      const typeLabel = spot.wardType === "obs" ? "假眼 Observer" : "真眼 Sentry";
+      const typeColor = spot.wardType === "obs" ? "#4cd08a" : "#58b7ff";
+      if (title) title.textContent = `聚合点位 · ${typeLabel}`;
+      const members = [...(spot.members || [])].sort((a, b) => (Number(b.valueScore) || 0) - (Number(a.valueScore) || 0));
+      detail.className = "";
+      detail.innerHTML = `
+        <div class="detail-list">
+          <div><strong>类型：</strong><span style="color:${typeColor}">${typeLabel}</span></div>
+          <div><strong>布眼次数：</strong>${spot.count} 次 · ${spot.teamCount} 支队参与</div>
+          <div><strong>参与战队：</strong>${(spot.teamTags || []).map(t => t.toUpperCase()).join("、")}</div>
+          <div><strong>均值：</strong>价值分 ${spot.avgScore} · 可见 ${spot.avgSeenSeconds}s · 存活 ${spot.avgLifetimeSeconds}s${spot.wardType === "sen" ? ` · 真视 ${spot.avgTrueSightSeconds}s` : ""}</div>
+          <div><strong>被排率：</strong>${spot.dewardRate == null ? "未知" : Math.round(spot.dewardRate * 100) + "%"}</div>
+          <div><strong>地图坐标：</strong>${Math.round(spot.pixel.x)}, ${Math.round(spot.pixel.y)}</div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px"><table>
+          <thead><tr>
+            <th>战队</th><th>下眼</th><th>阵营</th><th>分数${helpBadge("价值分")}</th>
+            <th>可见${helpBadge("可见秒数")}</th><th>存活</th><th>真视</th><th>被排${helpBadge("被排率")}</th><th>点位</th>
+          </tr></thead>
+          <tbody>${members.map(inst => `<tr>
+            <td>${teamLogoHtml(inst.teamTag)}${String(inst.teamTag || "").toUpperCase()}</td>
+            <td>${fmtTime(inst.start)}</td>
+            <td>${SIDE_LABEL[inst.team] || inst.team || "-"}</td>
+            <td>${inst.valueScore ?? "-"}</td>
+            <td>${inst.enemyHeroSeenSeconds ?? 0}</td>
+            <td>${inst.lifetimeSeconds ?? "-"}s</td>
+            <td>${inst.invisibleHeroTrueSightSeconds ?? 0}</td>
+            <td>${inst.dewarded == null ? "未知" : inst.dewarded ? "是" : "否"}</td>
+            <td>${inst.spotId || "-"}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>`;
+      hydrateTeamLogos();
+    }
+
+    function selectAggSpot(spotKey) {
+      const spots = state._aggSpots || [];
+      const spot = spots.find(s => s.spotKey === spotKey);
+      if (!spot) return;
+      state.aggregateSelectedSpotKey = spotKey;
+      renderAggSpotDetail(spot);
+      drawAggregateMap(spots, spotKey);
     }
 
     function updateAggregateViews() {
       const report = state.aggregate;
       if (!report) return;
-      const instances = aggAllInstances();
-      const wardType = state.aggregateWardType || "all";
-      const side = state.aggregateSide || "all";
-      const filtered = instances.filter(inst =>
-        (wardType === "all" || inst.wardType === wardType) && (side === "all" || inst.team === side));
+      const filtered = aggFilteredInstances();
       const obsCount = filtered.filter(inst => inst.wardType === "obs").length;
       const senCount = filtered.filter(inst => inst.wardType === "sen").length;
-      const spots = aggregateWardSpots(instances, wardType, side);
+      const spots = aggregateWardSpots(filtered);
+      const range = state.aggregateTimeRange || [0, 999999];
+      const tMin = Math.min(range[0], range[1]);
+      const tMax = Math.max(range[0], range[1]);
 
       const summary = document.getElementById("aggSummary");
       if (summary) {
         summary.innerHTML = `
-          <span class="pill">共 ${filtered.length} 颗眼</span>
+          <span class="pill">筛选后 ${filtered.length} 颗眼</span>
           <span class="pill" style="color:#4cd08a">假眼 ${obsCount}</span>
           <span class="pill" style="color:#58b7ff">真眼 ${senCount}</span>
-          <span class="pill">${spots.length} 个聚合位置</span>`;
+          <span class="pill">${spots.length} 个聚合位置</span>
+          <span class="pill">${fmtTime(tMin)}~${fmtTime(tMax)}</span>`;
       }
 
       const topTable = document.getElementById("aggTopTable");
       if (topTable) {
         const top = [...spots].sort((a, b) => b.count - a.count).slice(0, 15);
         topTable.innerHTML = top.length ? `<table>
-          <thead><tr><th>类型</th><th>次数</th><th>参与队</th><th>均分</th></tr></thead>
-          <tbody>${top.map(spot => `<tr>
+          <thead><tr><th>类型</th><th>次数</th><th>参与队</th><th>均分</th><th>可见</th><th>被排率</th></tr></thead>
+          <tbody>${top.map(spot => `<tr class="clickable" data-agg-spot="${spot.spotKey}">
             <td><span style="color:${spot.wardType === "obs" ? "#4cd08a" : "#58b7ff"}">${spot.wardType === "obs" ? "假眼" : "真眼"}</span></td>
-            <td>${spot.count}</td><td>${spot.teamCount}</td><td>${spot.avgScore}</td></tr>`).join("")}</tbody>
+            <td>${spot.count}</td><td>${spot.teamCount}</td><td>${spot.avgScore}</td>
+            <td>${spot.avgSeenSeconds}s</td>
+            <td>${spot.dewardRate == null ? "-" : Math.round(spot.dewardRate * 100) + "%"}</td></tr>`).join("")}</tbody>
         </table>` : `<div class="empty">当前筛选下没有眼位。</div>`;
+        topTable.querySelectorAll("[data-agg-spot]").forEach(row =>
+          row.addEventListener("click", () => selectAggSpot(row.getAttribute("data-agg-spot"))));
       }
 
       state._aggSpots = spots;
-      drawAggregateMap(spots);
+      const selectedKey = state.aggregateSelectedSpotKey;
+      const selectedStill = selectedKey && spots.some(s => s.spotKey === selectedKey);
+      if (selectedStill) {
+        renderAggSpotDetail(spots.find(s => s.spotKey === selectedKey));
+      } else {
+        state.aggregateSelectedSpotKey = null;
+        const detail = document.getElementById("aggSpotDetail");
+        const title = document.getElementById("aggDetailTitle");
+        if (title) title.textContent = "聚合点位详情";
+        if (detail) {
+          detail.className = "empty";
+          detail.innerHTML = "点击地图上的点或下方列表，查看该位置每一颗眼的详细参数。";
+        }
+      }
+      drawAggregateMap(spots, selectedStill ? selectedKey : null);
       renderAnalysisBar("aggregate");
     }
 
-    async function drawAggregateMap(spots) {
+    async function drawAggregateMap(spots, selectedSpotKey = null) {
       if (!state.aggregate) return;
       try { await loadMapImage(); } catch (error) { setStatus(`地图图片加载失败：${error.message}`, true); return; }
       const canvas = document.getElementById("aggregateMap");
@@ -4041,28 +4246,48 @@
       ctx.drawImage(state.mapImage, 0, 0, canvas.width, canvas.height);
       const sx = canvas.width / 851, sy = canvas.height / 851;
       const maxCount = Math.max(1, ...spots.map(spot => spot.count));
-      // 先画假眼再画真眼，真眼叠在上层更醒目。
-      const order = [...spots].sort((a, b) => (a.wardType === "sen") - (b.wardType === "sen"));
+      const maxScore = Math.max(1, ...spots.map(spot => Number(spot.avgScore) || 0));
+      // 先画低均分、后画高均分，高分点更亮且带金色外圈。
+      const order = [...spots].sort((a, b) => {
+        const wt = (a.wardType === "sen") - (b.wardType === "sen");
+        if (wt !== 0) return wt;
+        return (Number(a.avgScore) || 0) - (Number(b.avgScore) || 0);
+      });
       for (const spot of order) {
         if (!spot.pixel) continue;
         const x = spot.pixel.x * sx, y = spot.pixel.y * sy;
         const r = Math.max(3, Math.min(20, 3 + Math.sqrt(spot.count) * 2.4));
         const rgb = spot.wardType === "obs" ? "72,208,127" : "88,183,255";
+        const isSelected = selectedSpotKey === spot.spotKey;
+        const scoreNorm = Math.min(1, (Number(spot.avgScore) || 0) / maxScore);
+        const countNorm = spot.count / maxCount;
+        const isHighValue = scoreNorm >= 0.72 || (Number(spot.avgScore) || 0) >= 55;
         ctx.save();
-        ctx.globalAlpha = 0.35 + 0.5 * (spot.count / maxCount);
-        ctx.shadowColor = `rgba(${rgb},0.9)`;
-        ctx.shadowBlur = 10;
+        ctx.globalAlpha = isSelected ? 0.98 : (0.22 + 0.58 * scoreNorm + 0.1 * countNorm);
+        ctx.shadowColor = isHighValue ? "rgba(244,201,92,0.95)" : `rgba(${rgb},0.9)`;
+        ctx.shadowBlur = isSelected ? 22 : (8 + scoreNorm * 18 + (isHighValue ? 6 : 0));
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${rgb},0.85)`;
+        ctx.fillStyle = `rgba(${rgb},${0.65 + scoreNorm * 0.35})`;
         ctx.fill();
         ctx.restore();
-        ctx.lineWidth = 1.1;
-        ctx.strokeStyle = "rgba(0,0,0,0.7)";
+        if (isHighValue && !isSelected) {
+          ctx.beginPath();
+          ctx.arc(x, y, r + 2.5, 0, Math.PI * 2);
+          ctx.lineWidth = 1.5 + scoreNorm * 1.5;
+          ctx.strokeStyle = `rgba(244,201,92,${0.45 + scoreNorm * 0.5})`;
+          ctx.stroke();
+        }
+        ctx.lineWidth = isSelected ? 3 : (isHighValue ? 2 : 1.1);
+        ctx.strokeStyle = isSelected
+          ? "rgba(255,255,255,0.95)"
+          : isHighValue ? "rgba(255,235,180,0.85)" : "rgba(0,0,0,0.7)";
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.stroke();
       }
       const tip = document.getElementById("aggTip");
-      canvas.onmousemove = event => {
+      const nearest = event => {
         const rect = canvas.getBoundingClientRect();
         const x = (event.clientX - rect.left) * canvas.width / rect.width;
         const y = (event.clientY - rect.top) * canvas.height / rect.height;
@@ -4072,14 +4297,22 @@
           const d = Math.hypot(spot.pixel.x * sx - x, spot.pixel.y * sy - y);
           if (d < bestD) { bestD = d; best = spot; }
         }
+        return { best, bestD };
+      };
+      canvas.onmousemove = event => {
+        const { best, bestD } = nearest(event);
         if (tip && best && bestD < 24) {
-          tip.style.left = `${event.clientX - rect.left}px`;
-          tip.style.top = `${event.clientY - rect.top}px`;
+          tip.style.left = `${event.clientX - canvas.getBoundingClientRect().left}px`;
+          tip.style.top = `${event.clientY - canvas.getBoundingClientRect().top}px`;
           tip.style.display = "block";
-          tip.innerHTML = `<div class="tip-title">${best.wardType === "obs" ? "假眼 Observer" : "真眼 Sentry"}</div>
-            <div class="tip-row">布眼 ${best.count} 次 · ${best.teamCount} 支队 · 均分 ${best.avgScore}</div>`;
+          tip.innerHTML = `<div class="tip-title">${best.wardType === "obs" ? "假眼 Observer" : "真眼 Sentry"}${(Number(best.avgScore) || 0) >= 55 ? " · 高价值" : ""}</div>
+            <div class="tip-row">布眼 ${best.count} 次 · 均分 ${best.avgScore} · ${best.teamCount} 支队 · 点击查看详情</div>`;
           canvas.style.cursor = "pointer";
         } else if (tip) { tip.style.display = "none"; canvas.style.cursor = "default"; }
+      };
+      canvas.onclick = event => {
+        const { best, bestD } = nearest(event);
+        if (best && bestD < 24) selectAggSpot(best.spotKey);
       };
       canvas.onmouseleave = () => { if (tip) tip.style.display = "none"; canvas.style.cursor = "default"; };
     }
@@ -4134,6 +4367,7 @@
     el.aggClear.addEventListener("click", () => {
       state.aggregateTeams = [];
       state.aggregate = null;
+      state.aggregateSelectedSpotKey = null;
       renderAggChips();
       renderAggTeamPicker();
       renderAggregate();
