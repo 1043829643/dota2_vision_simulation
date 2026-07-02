@@ -2,3 +2,4 @@ Pillow>=10.0
 PyMySQL>=1.1
 fastapi>=0.115
 uvicorn[standard]>=0.30
+numpy>=1.26

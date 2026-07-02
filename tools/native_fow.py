@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 
 TAU = math.tau
 CACHE_TILE_STRUCT = struct.Struct("<III f II f")
@@ -287,6 +289,14 @@ def visible_cells(
     world_y: float,
     radius_world: float,
 ) -> tuple[list[list[int]], dict]:
+    """NumPy-vectorized visibility scan.
+
+    Produces the exact same set of visible cells (and the same blockedByKind
+    tallies) as the original per-cell/per-blocker double loop, but evaluates the
+    whole candidate window as vectorized array operations. The only Python-level
+    loop left is over the angular blockers, and each iteration is a handful of
+    NumPy ops over the (already filtered) candidate cells.
+    """
     origin = grid.world_to_cell(world_x, world_y)
     if not grid.in_bounds(*origin):
         return [], {"invalid": True, "originCell": list(origin)}
@@ -298,47 +308,79 @@ def visible_cells(
         grid, cache, origin, radius_cells, viewer_height
     )
 
-    cells: list[list[int]] = []
-    blocked_by_kind = {"tree": 0, "occluder": 0}
-    search_radius = math.ceil(radius_cells)
     ox, oy = origin
-    for dy in range(-search_radius, search_radius + 1):
-        for dx in range(-search_radius, search_radius + 1):
-            distance_sq = dx * dx + dy * dy
-            if distance_sq > radius_cells * radius_cells:
-                continue
-            x, y = ox + dx, oy + dy
-            if not grid.hard_visible_at(x, y):
-                continue
-            if distance_sq == 0:
-                cells.append([x, y])
-                continue
+    search_radius = math.ceil(radius_cells)
+    radius_cells_sq = radius_cells * radius_cells
 
-            target_angle = normalize_angle(math.atan2(dx, dy))
-            blocker_hit = None
-            for blocker in blockers:
-                if distance_sq <= blocker.distance_sq_cells:
-                    continue
-                if angle_in_interval(
-                    target_angle, blocker.start_angle, blocker.end_angle
-                ):
-                    blocker_hit = blocker
-                    break
-            if blocker_hit is None:
-                cells.append([x, y])
+    offsets = np.arange(-search_radius, search_radius + 1, dtype=np.int64)
+    dx_grid, dy_grid = np.meshgrid(offsets, offsets)
+    dx = dx_grid.ravel()
+    dy = dy_grid.ravel()
+    dist_sq = dx * dx + dy * dy
+
+    # Candidate = inside the vision radius (matches the original distance test).
+    candidate = dist_sq <= radius_cells_sq
+    candidate_cell_count = int(candidate.sum())
+
+    x = dx + ox
+    y = dy + oy
+    in_bounds = (x >= 0) & (x < grid.width) & (y >= 0) & (y < grid.height)
+    valid = candidate & in_bounds
+
+    # hard_visible gate. None means "everything in-bounds is hard visible".
+    if grid.hard_visible is None:
+        hard_ok = valid
+    else:
+        hv_np = getattr(grid, "_hard_visible_np", None)
+        if hv_np is None:
+            hv_np = np.asarray(grid.hard_visible, dtype=bool)
+            grid._hard_visible_np = hv_np
+        hard_ok = valid.copy()
+        valid_idx = np.nonzero(valid)[0]
+        hard_ok[valid_idx] = hv_np[y[valid_idx] * grid.width + x[valid_idx]]
+
+    blocked = np.zeros(dist_sq.shape[0], dtype=bool)
+    blocked_by_kind = {"tree": 0, "occluder": 0}
+
+    # The origin cell (distance 0) is never subject to blockers.
+    test_mask = hard_ok & (dist_sq > 0)
+    if blockers and test_mask.any():
+        test_idx = np.nonzero(test_mask)[0]
+        # NOTE: keep the original atan2(dx, dy) argument order.
+        angle_sub = np.mod(
+            np.arctan2(dx[test_idx].astype(np.float64), dy[test_idx].astype(np.float64)),
+            TAU,
+        )
+        dist_sub = dist_sq[test_idx].astype(np.float64)
+        blocked_sub = np.zeros(test_idx.shape[0], dtype=bool)
+        for blocker in blockers:
+            # A blocker only occludes cells strictly farther than it.
+            active = (~blocked_sub) & (dist_sub > blocker.distance_sq_cells)
+            if not active.any():
+                continue
+            start = normalize_angle(blocker.start_angle)
+            end = normalize_angle(blocker.end_angle)
+            if start <= end:
+                inside = (angle_sub >= start) & (angle_sub <= end)
             else:
-                blocked_by_kind[blocker_hit.kind] += 1
+                inside = (angle_sub >= start) | (angle_sub <= end)
+            newly = active & inside
+            count = int(newly.sum())
+            if count:
+                # Attribute each cell to the first blocker (in list order) that
+                # occludes it, matching the original "break on first hit".
+                blocked_by_kind[blocker.kind] += count
+                blocked_sub |= newly
+        blocked[test_idx] = blocked_sub
+
+    visible_mask = hard_ok & (~blocked)
+    cells = np.column_stack((x[visible_mask], y[visible_mask])).tolist()
 
     return cells, {
         "invalid": False,
         "originCell": list(origin),
         "viewerHeight": viewer_height,
-        "candidateCellCount": sum(
-            1
-            for dy in range(-search_radius, search_radius + 1)
-            for dx in range(-search_radius, search_radius + 1)
-            if dx * dx + dy * dy <= radius_cells * radius_cells
-        ),
+        "candidateCellCount": candidate_cell_count,
         "visibleCellCount": len(cells),
         "angularBlockerCount": len(blockers),
         "blockedByKind": blocked_by_kind,
