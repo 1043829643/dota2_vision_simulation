@@ -1080,6 +1080,8 @@
       cmpPlayTime: null,
       cmpPlaying: false,
       cmpShowVision: false,
+      contextGameState: "all",
+      contextAegis: "all",
       wvMapView: "both",
       wvShowVision: false,
     };
@@ -1420,6 +1422,9 @@
       ["样本置信度", "按参与计算的比赛场数给出的可信度：≥20 高、≥8 中、否则低。"],
       ["Hero-seconds", "所有眼看到敌方英雄的秒数总和，衡量视野信息量的总盘子。"],
       ["高价值假眼", "价值分达到高档的假眼数量，占比越高说明布眼越高效。"],
+      ["局势 (Game State)", "下眼时刻相对敌方的团队经济差：领先 ≥3k、均势 ±3k、落后 ≥3k。"],
+      ["带盾 (Aegis)", "下眼时刻己方是否有人持有不朽之守护（modifier_aegis_regen）。"],
+      ["高质量眼", "价值分 ≥55 的下眼实例，代表该次布置的信息/存活综合表现较好。"],
     ];
 
     function helpBadge(term) {
@@ -1708,6 +1713,13 @@
       { id: "mid", name: "中期 10-30m", min: 600, max: 1800 },
       { id: "late", name: "后期 30m+", min: 1800, max: 99999 },
     ];
+    const GAME_STATE_FACETS = [
+      { id: "ahead", name: "领先 ≥3k", label: "领先" },
+      { id: "even", name: "均势 ±3k", label: "均势" },
+      { id: "behind", name: "落后 ≥3k", label: "落后" },
+    ];
+    const GAME_STATE_LABEL = { ahead: "领先", even: "均势", behind: "落后", all: "全部" };
+    const HIGH_VALUE_SCORE = 55;
     const OBSERVER_RADIUS_WORLD = 1600;
 
     function zoneForPixel(x, y) {
@@ -1777,6 +1789,111 @@
     function avgMetric(instances, key) {
       const vals = instances.map(i => Number(i[key])).filter(v => Number.isFinite(v));
       return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    }
+
+    function passesContextFilter(inst) {
+      const gs = state.contextGameState || "all";
+      const ae = state.contextAegis || "all";
+      if (gs !== "all") {
+        if (!inst.gameState || inst.gameState !== gs) return false;
+      }
+      if (ae === "yes" && !inst.teamHasAegis) return false;
+      if (ae === "no" && inst.teamHasAegis === true) return false;
+      return true;
+    }
+
+    function hasPlacementContext(instances) {
+      return (instances || []).some(inst => inst.gameState);
+    }
+
+    function contextFiltersHtml() {
+      return `
+        <div>
+          <label class="muted" for="contextGameStateFilter">局势${helpBadge("局势 (Game State)")}</label>
+          <select id="contextGameStateFilter" style="width:120px;display:block;margin-top:4px">
+            <option value="all">全部</option>
+            <option value="ahead">领先 ≥3k</option>
+            <option value="even">均势 ±3k</option>
+            <option value="behind">落后 ≥3k</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" for="contextAegisFilter">带盾${helpBadge("带盾 (Aegis)")}</label>
+          <select id="contextAegisFilter" style="width:100px;display:block;margin-top:4px">
+            <option value="all">全部</option>
+            <option value="yes">有盾</option>
+            <option value="no">无盾</option>
+          </select>
+        </div>`;
+    }
+
+    function bindContextFilters(onChange) {
+      const gs = document.getElementById("contextGameStateFilter");
+      const ae = document.getElementById("contextAegisFilter");
+      if (gs) {
+        gs.value = state.contextGameState || "all";
+        gs.onchange = () => { state.contextGameState = gs.value; onChange(); };
+      }
+      if (ae) {
+        ae.value = state.contextAegis || "all";
+        ae.onchange = () => { state.contextAegis = ae.value; onChange(); };
+      }
+    }
+
+    function contextStatsHtml(instances, title = "局势 × 带盾 统计") {
+      if (!instances.length) return `<div class="empty">当前筛选下没有眼位。</div>`;
+      if (!hasPlacementContext(instances)) {
+        return `<div class="empty">当前数据未含下眼时刻局势快照，请重新计算点位库/对比/聚合（需 forceRefresh）。</div>`;
+      }
+      const rows = GAME_STATE_FACETS.map(facet => {
+        const bucket = instances.filter(inst => inst.gameState === facet.id);
+        const high = bucket.filter(inst => Number(inst.valueScore) >= HIGH_VALUE_SCORE);
+        const aegis = bucket.filter(inst => inst.teamHasAegis);
+        const avg = bucket.length ? Math.round(avgMetric(bucket, "valueScore") * 100) / 100 : 0;
+        return `<tr>
+          <td>${facet.label}</td>
+          <td>${bucket.length}</td>
+          <td>${avg}</td>
+          <td>${high.length}</td>
+          <td>${aegis.length}</td>
+          <td>${bucket.length ? Math.round(high.length / bucket.length * 100) + "%" : "-"}</td>
+        </tr>`;
+      }).join("");
+      const cross = [
+        ["领先 + 有盾", instances.filter(i => i.gameState === "ahead" && i.teamHasAegis).length],
+        ["领先 + 无盾", instances.filter(i => i.gameState === "ahead" && !i.teamHasAegis).length],
+        ["落后 + 有盾", instances.filter(i => i.gameState === "behind" && i.teamHasAegis).length],
+        ["落后 + 无盾", instances.filter(i => i.gameState === "behind" && !i.teamHasAegis).length],
+      ].map(([label, count]) => `<span class="pill">${label} ${count}</span>`).join("");
+      return `<div class="panel" style="background:var(--surface-3)">
+        <h3>${title}</h3>
+        <div class="pill-row" style="margin-top:8px">${cross}</div>
+        <div class="table-wrap" style="margin-top:10px"><table>
+          <thead><tr><th>局势</th><th>眼数</th><th>均分</th><th>高质量${helpBadge("高质量眼")}</th><th>带盾下眼</th><th>高质量占比</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+    }
+
+    function renderContextFacetMaps(containerId, instances, skipContext = false) {
+      const wrap = document.getElementById(containerId);
+      if (!wrap) return;
+      const base = skipContext ? instances : instances;
+      if (!hasPlacementContext(base)) {
+        wrap.innerHTML = `<div class="empty">重新计算后可查看领先/均势/落后下的高质量眼位分面图。</div>`;
+        return;
+      }
+      wrap.innerHTML = GAME_STATE_FACETS.map(facet => `
+        <div class="mini-map-wrap">
+          <canvas class="mini-map" data-context="${facet.id}" width="851" height="851"></canvas>
+          <span class="muted">${facet.name} · 高质量眼</span>
+        </div>`).join("");
+      for (const canvas of wrap.querySelectorAll("canvas[data-context]")) {
+        const facetId = canvas.dataset.context;
+        const facetInst = base.filter(inst =>
+          inst.gameState === facetId && Number(inst.valueScore) >= HIGH_VALUE_SCORE && inst.pixel);
+        drawMiniAggregateMap(canvas, facetInst);
+      }
     }
 
     function bulletHtml(value, bench, max, suffix = "") {
@@ -1968,20 +2085,22 @@
       if (btn) btn.textContent = "播放";
     }
 
-    function wvAllInstances() {
+    function wvAllInstances(skipContext = false) {
       const side = state.wardValueSide || "all";
       const sideOk = t => side === "all" || t === side;
       const out = [];
       for (const spot of state.wardValue?.spotDetails || []) {
         if (!sideOk(spot.team)) continue;
         for (const inst of spot.instances || []) {
-          out.push({
+          const row = {
             ...inst,
             spotId: spot.spotId,
             wardType: inst.wardType || spot.wardType,
             team: inst.team || spot.team,
             pixel: inst.pixel || spot.pixel,
-          });
+          };
+          if (!skipContext && !passesContextFilter(row)) continue;
+          out.push(row);
         }
       }
       return out;
@@ -2614,6 +2733,15 @@
           ${card("聚类点位", spotsF.length)}
           ${card("隐身数据", s.invisibilityDataAvailable ? "可用" : "缺失")}
         </div>
+        <div class="cmp-filters" style="margin-top:10px">
+          ${contextFiltersHtml()}
+        </div>
+        <div id="wvContextStats" style="margin-top:10px"></div>
+        <div class="panel" style="margin-top:14px">
+          <h3>局势分面 · 高质量眼位</h3>
+          <div class="subtitle" style="margin-top:4px">领先 / 均势 / 落后时价值分 ≥${HIGH_VALUE_SCORE} 的下眼热力分布（不受上方「局势」筛选影响）。</div>
+          <div class="viz-grid-3" id="wvContextMaps"></div>
+        </div>
         <div id="wvZoneStats" style="margin-top:10px"></div>
         <div class="viz-grid-3" style="margin-top:14px">
           <div class="panel" style="background:var(--surface-3)">
@@ -2694,6 +2822,7 @@
       renderSpotBoard(boards[0].key);
 
       const wvInst = wvAllInstances();
+      bindContextFilters(() => renderWardValue());
       const zoneEl = document.getElementById("wvZoneStats");
       if (zoneEl) zoneEl.innerHTML = zoneStatsHtml(wvInst);
       const hist = buildTimeHistogram(wvInst, 120);
@@ -2703,6 +2832,9 @@
         life: Number(i.lifetimeSeconds) || 0,
         score: Number(i.valueScore) || 0,
       }))));
+      const ctxStats = document.getElementById("wvContextStats");
+      if (ctxStats) ctxStats.innerHTML = contextStatsHtml(wvAllInstances(true), "点位库 · 局势统计");
+      renderContextFacetMaps("wvContextMaps", wvAllInstances(true));
 
       const mapViewSel = document.getElementById("wvMapView");
       if (mapViewSel) {
@@ -2898,13 +3030,14 @@
           <div><strong>坐标：</strong>${Math.round(spot.centerWorldX)}, ${Math.round(spot.centerWorldY)}</div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>比赛</th><th>时间</th><th>分数</th><th>可见秒</th><th>真视秒</th><th>结果</th></tr></thead>
+          <thead><tr><th>比赛</th><th>时间</th><th>分数</th><th>可见秒</th><th>真视秒</th><th>局势</th><th>结果</th></tr></thead>
           <tbody>${instances.slice(0, 30).map(item => `<tr>
             <td>${item.matchId}</td>
             <td>${fmtTime(item.start)}</td>
             <td>${item.valueScore}</td>
             <td>${item.enemyHeroSeenSeconds || 0}</td>
             <td>${item.invisibleHeroTrueSightSeconds || 0}</td>
+            <td>${item.gameState ? GAME_STATE_LABEL[item.gameState] || item.gameState : "-"}${item.teamHasAegis ? " · 盾" : ""}${item.goldDiff != null ? `<br><span class="muted">${item.goldDiff >= 0 ? "+" : ""}${item.goldDiff}</span>` : ""}</td>
             <td>${item.removedReason || ""}<br><button class="ghost" data-jump-match="${item.matchId}" data-jump-time="${item.start}" data-jump-ward="${item.ehandle}">跳到时间轴</button></td>
           </tr>`).join("")}</tbody>
         </table></div>
@@ -3795,7 +3928,7 @@
       return tags.flatMap(tag => report.instancesByTeam[tag] || []);
     }
 
-    function cmpFilteredInstances() {
+    function cmpFilteredInstances(skipContext = false) {
       const cmpSide = state.comparisonSide || "all";
       const wardType = state.comparisonWardType || "all";
       const range = state.comparisonTimeRange || [0, 999999];
@@ -3806,6 +3939,7 @@
         if (wardType !== "all" && inst.wardType !== wardType) return false;
         const start = Number(inst.start);
         if (Number.isFinite(start) && (start < tMin || start > tMax)) return false;
+        if (!skipContext && !passesContextFilter(inst)) return false;
         return true;
       });
     }
@@ -4006,6 +4140,7 @@
           scheduleComparisonUpdate();
         }, 400);
       });
+      bindContextFilters(scheduleComparisonUpdate);
     }
 
     // 合并高频滑块事件：一帧最多执行一次全量重算/重绘。
@@ -4022,10 +4157,11 @@
       const report = state.comparison;
       if (!report) return;
       const tags = report.source.teamTags || [];
-      let filtered = cmpFilteredInstances();
+      let base = cmpFilteredInstances(true);
       if (state.cmpPlayTime != null) {
-        filtered = filtered.filter(inst => Number(inst.start) <= state.cmpPlayTime);
+        base = base.filter(inst => Number(inst.start) <= state.cmpPlayTime);
       }
+      const filtered = base.filter(passesContextFilter);
       const teams = tags.map(tag => cmpTeamSummaryFromInstances(tag, filtered));
       const topByTeam = Object.fromEntries(tags.map(tag => [tag, cmpTopSpotsForTeam(tag, filtered)]));
       const mapSpots = cmpMapSpotsFromInstances(filtered);
@@ -4045,6 +4181,9 @@
 
       const zoneEl = document.getElementById("cmpZoneStats");
       if (zoneEl) zoneEl.innerHTML = zoneStatsHtml(filtered);
+      const ctxStats = document.getElementById("cmpContextStats");
+      if (ctxStats) ctxStats.innerHTML = contextStatsHtml(filtered, "对比 · 局势统计");
+      renderContextFacetMaps("cmpContextMaps", base);
 
       const hist = buildTimeHistogram(filtered, 120);
       makeChart("cmpTimeHist", histogramOption(hist.labels, hist.obs, hist.sen));
@@ -4248,6 +4387,7 @@
                 <input id="cmpTimeMax" type="range" />
               </div>
             </div>
+            ${contextFiltersHtml()}
             <div>
               <label class="muted" for="cmpMapMode">地图模式</label>
               <select id="cmpMapMode" style="width:120px;display:block;margin-top:4px">
@@ -4276,6 +4416,7 @@
           </div>
           ${hasInstances ? "" : `<div class="empty" style="margin-top:10px">当前对比结果不含实例时间数据，请重新计算对比以启用时间轴筛选。</div>`}
           <div id="cmpZoneStats" style="margin-top:10px"></div>
+          <div id="cmpContextStats" style="margin-top:10px"></div>
           <div id="cmpInsight" class="insight-block" style="display:none"></div>
           <div class="viz-grid-3" style="margin-top:14px">
             <div class="panel" style="background:var(--surface-3)">
@@ -4303,6 +4444,11 @@
                 <tbody id="cmpKpiBody"></tbody>
               </table></div>
             </div>
+          </div>
+          <div class="panel" style="margin-top:14px">
+            <h3>局势分面 · 高质量眼位</h3>
+            <div class="subtitle" style="margin-top:4px">领先 / 均势 / 落后时价值分 ≥${HIGH_VALUE_SCORE} 的下眼分布（不受上方「局势」筛选影响）。</div>
+            <div class="viz-grid-3" id="cmpContextMaps"></div>
           </div>
         </div>
         <div class="cmp-top-grid" id="cmpTopGrid"></div>
@@ -4557,7 +4703,7 @@
       state.aggregateTimeRange = [bounds.min, bounds.max];
     }
 
-    function aggFilteredInstances() {
+    function aggFilteredInstances(skipContext = false) {
       const wardType = state.aggregateWardType || "all";
       const side = state.aggregateSide || "all";
       const range = state.aggregateTimeRange || [0, 999999];
@@ -4568,6 +4714,7 @@
         if (wardType !== "all" && inst.wardType !== wardType) return false;
         const start = Number(inst.start);
         if (Number.isFinite(start) && (start < tMin || start > tMax)) return false;
+        if (!skipContext && !passesContextFilter(inst)) return false;
         return true;
       });
     }
@@ -4675,6 +4822,7 @@
                 <option value="dots">仅圆点</option>
               </select>
             </div>
+            ${contextFiltersHtml()}
             <div class="cmp-time-wrap">
               <div class="cmp-time-labels">
                 <span id="aggTimeMinLabel">0:00</span>
@@ -4700,6 +4848,7 @@
           ${hasInstances ? "" : `<div class="empty" style="margin-top:10px">当前结果不含实例时间数据，请重新聚合以启用时间轴筛选。</div>`}
           <div class="pill-row" style="margin-top:8px">${tags.map(t => `<span class="pill">${teamLogoHtml(t)}${t.toUpperCase()}</span>`).join("")}</div>
           <div id="aggZoneStats" style="margin-top:10px"></div>
+          <div id="aggContextStats" style="margin-top:10px"></div>
         </div>
         <div class="viz-grid-3" style="margin-top:14px">
           <div class="panel" style="background:var(--surface-3)">
@@ -4715,6 +4864,11 @@
           <h3>阶段化小地图</h3>
           <div class="subtitle" style="margin-top:4px">对线期 / 中期 / 后期各阶段的下眼热力分布。</div>
           <div class="viz-grid-3" id="aggPhaseMaps"></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <h3>局势分面 · 高质量眼位</h3>
+          <div class="subtitle" style="margin-top:4px">领先 / 均势 / 落后时价值分 ≥${HIGH_VALUE_SCORE} 的下眼热力分布（不受上方「局势」筛选影响）。</div>
+          <div class="viz-grid-3" id="aggContextMaps"></div>
         </div>
         <div class="result-layout" style="margin-top:14px">
           <article class="panel map-card">
@@ -4827,6 +4981,7 @@
           scheduleAggregateUpdate();
         }, 180);
       });
+      bindContextFilters(scheduleAggregateUpdate);
     }
 
     let _aggUpdateRaf = 0;
@@ -4858,13 +5013,14 @@
         </div>
         <div class="table-wrap" style="margin-top:10px"><table>
           <thead><tr>
-            <th>战队</th><th>下眼</th><th>阵营</th><th>分数${helpBadge("价值分")}</th>
+            <th>战队</th><th>下眼</th><th>阵营</th><th>局势</th><th>分数${helpBadge("价值分")}</th>
             <th>可见${helpBadge("可见秒数")}</th><th>存活</th><th>真视</th><th>被排${helpBadge("被排率")}</th><th>点位</th>
           </tr></thead>
           <tbody>${members.map(inst => `<tr>
             <td>${teamLogoHtml(inst.teamTag)}${String(inst.teamTag || "").toUpperCase()}</td>
             <td>${fmtTime(inst.start)}</td>
             <td>${SIDE_LABEL[inst.team] || inst.team || "-"}</td>
+            <td>${inst.gameState ? GAME_STATE_LABEL[inst.gameState] || inst.gameState : "-"}${inst.teamHasAegis ? " · 盾" : ""}${inst.goldDiff != null ? `<br><span class="muted">${inst.goldDiff >= 0 ? "+" : ""}${inst.goldDiff}</span>` : ""}</td>
             <td>${inst.valueScore ?? "-"}</td>
             <td>${inst.enemyHeroSeenSeconds ?? 0}</td>
             <td>${inst.lifetimeSeconds ?? "-"}s</td>
@@ -4888,10 +5044,11 @@
     function updateAggregateViews() {
       const report = state.aggregate;
       if (!report) return;
-      let filtered = aggFilteredInstances();
+      let base = aggFilteredInstances(true);
       if (state.aggPlayTime != null) {
-        filtered = filtered.filter(inst => Number(inst.start) <= state.aggPlayTime);
+        base = base.filter(inst => Number(inst.start) <= state.aggPlayTime);
       }
+      const filtered = base.filter(passesContextFilter);
       const obsCount = filtered.filter(inst => inst.wardType === "obs").length;
       const senCount = filtered.filter(inst => inst.wardType === "sen").length;
       const spots = aggregateWardSpots(filtered);
@@ -4914,6 +5071,9 @@
 
       const zoneEl = document.getElementById("aggZoneStats");
       if (zoneEl) zoneEl.innerHTML = zoneStatsHtml(filtered);
+      const ctxStats = document.getElementById("aggContextStats");
+      if (ctxStats) ctxStats.innerHTML = contextStatsHtml(filtered, "聚合 · 局势统计");
+      renderContextFacetMaps("aggContextMaps", base);
 
       const hist = buildTimeHistogram(filtered, 120);
       makeChart("aggTimeHist", histogramOption(hist.labels, hist.obs, hist.sen));

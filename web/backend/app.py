@@ -67,9 +67,9 @@ def _env_or_config(key: str, default: str = "") -> str:
 
 DEFAULT_DB = _env_or_config("DOTA_DB_DATABASE", "dota2_analysis")
 DEFAULT_OVERVIEW_DB = _env_or_config("DOTA_OVERVIEW_DATABASE", "dwd_dota2")
-CACHE_VERSION = "ward-hero-visibility-v8"
-WARD_VALUE_CACHE_VERSION = "ward-value-v1"
-COMPARISON_CACHE_VERSION = "team-comparison-v4"
+CACHE_VERSION = "ward-hero-visibility-v9"
+WARD_VALUE_CACHE_VERSION = "ward-value-v2"
+COMPARISON_CACHE_VERSION = "team-comparison-v5"
 # 缓存目录必须持久：/tmp 会在系统重启/清理时丢失全部单场缓存与预热历史。
 DEFAULT_CACHE_ROOT = str(PROJECT_ROOT / "var" / "web_cache") if os.environ.get("DEPLOY_RUN_PORT") else str(PROJECT_ROOT / "outputs" / "web_cache")
 CACHE_ROOT = Path(_env_or_config("DOTA_CACHE_ROOT", DEFAULT_CACHE_ROOT))
@@ -119,7 +119,7 @@ PREWARM_HISTORY_LOCK = Lock()
 # 时调用 upsert_prewarmed_team_entry，若两者共用同一把非重入锁会造成同线程自死锁。
 PREWARMED_TEAMS_LOCK = Lock()
 MAX_PREWARM_HISTORY = 30
-MATCH_WARD_CACHE_VERSION = "match-ward-v1"
+MATCH_WARD_CACHE_VERSION = "match-ward-v2"
 _MATCH_WARD_LOCKS: dict[str, Lock] = {}
 _MATCH_WARD_LOCKS_GUARD = Lock()
 
@@ -1396,6 +1396,11 @@ def _instances_by_team(ward_value_by_team: dict[str, dict], team_tags: list[str]
                 "lifetimeSeconds": inst.get("lifetimeSeconds"),
                 "dewarded": inst.get("dewarded"),
                 "invisibleHeroTrueSightSeconds": inst.get("invisibleHeroTrueSightSeconds"),
+                "goldDiff": inst.get("goldDiff"),
+                "gameState": inst.get("gameState"),
+                "teamHasAegis": inst.get("teamHasAegis"),
+                "placementContext": inst.get("placementContext"),
+                "teamNetworth": inst.get("teamNetworth"),
                 "pixel": spot_pixels.get((tag, str(sid))) if sid else None,
             })
         result[tag] = items

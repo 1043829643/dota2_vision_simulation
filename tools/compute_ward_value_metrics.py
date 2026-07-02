@@ -24,6 +24,8 @@ RESOURCE_ROOT = PROJECT_ROOT / "resources"
 OBSERVER_RADIUS = 1600.0
 SENTRY_RADIUS = 1000.0
 MAP_VERSION = "7.41"
+GOLD_DIFF_AHEAD_THRESHOLD = 3000
+AEGIS_MODIFIER = "modifier_aegis_regen"
 
 
 def image_data_url(path: Path | None) -> str | None:
@@ -368,6 +370,138 @@ ORDER BY time,log_index
     }
 
 
+def load_team_networth_by_second(
+    cursor,
+    match_id: int,
+    start: int,
+    end: int,
+    players: dict[int, dict],
+) -> dict[int, dict[str, int]]:
+    rows = fetch_all(
+        cursor,
+        """
+SELECT time,slot,networth
+FROM player_intervals2
+WHERE CAST(match_id AS BIGINT)=%s
+  AND time BETWEEN %s AND %s
+ORDER BY time,slot,log_index
+""",
+        (match_id, start, end),
+    )
+    by_second: dict[int, dict[str, int]] = defaultdict(lambda: {"radiant": 0, "dire": 0})
+    seen: set[tuple[int, int]] = set()
+    for row in rows:
+        key = (int(row["time"]), int(row["slot"]))
+        if key in seen or key[1] not in players:
+            continue
+        seen.add(key)
+        try:
+            networth = int(float(row.get("networth") or 0))
+        except (TypeError, ValueError):
+            continue
+        team = players[key[1]]["team"]
+        if team in {"radiant", "dire"}:
+            by_second[key[0]][team] += networth
+    return by_second
+
+
+def load_aegis_seconds_by_team(
+    cursor,
+    match_id: int,
+    end: int,
+    players: dict[int, dict],
+) -> tuple[dict[str, set[int]], dict]:
+    hero_to_slot = {
+        str(player.get("heroName") or "").lower(): int(slot)
+        for slot, player in players.items()
+    }
+    try:
+        rows = fetch_all(
+            cursor,
+            """
+SELECT time,log_index,type,targetname,inflictor
+FROM combat_logs
+WHERE CAST(match_id AS BIGINT)=%s
+  AND inflictor=%s
+  AND type IN ('DOTA_COMBATLOG_MODIFIER_ADD','DOTA_COMBATLOG_MODIFIER_REMOVE')
+  AND time <= %s
+ORDER BY time,log_index
+""",
+            (match_id, AEGIS_MODIFIER, end),
+        )
+    except Exception as exc:
+        return {"radiant": set(), "dire": set()}, {
+            "available": False,
+            "reason": str(exc),
+            "eventRows": 0,
+            "holderSeconds": {"radiant": 0, "dire": 0},
+        }
+
+    active: dict[int, int] = {}
+    intervals_by_slot: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for row in rows:
+        hero = str(row.get("targetname") or "").lower()
+        slot = hero_to_slot.get(hero)
+        if slot is None:
+            continue
+        second = int(row["time"])
+        if row["type"] == "DOTA_COMBATLOG_MODIFIER_ADD":
+            active[slot] = second
+        elif row["type"] == "DOTA_COMBATLOG_MODIFIER_REMOVE" and slot in active:
+            intervals_by_slot[slot].append((active.pop(slot), second))
+    for slot, added_at in active.items():
+        intervals_by_slot[slot].append((added_at, end + 1))
+
+    team_seconds: dict[str, set[int]] = {"radiant": set(), "dire": set()}
+    for slot, intervals in intervals_by_slot.items():
+        team = players[slot]["team"]
+        if team not in team_seconds:
+            continue
+        for interval_start, interval_end in intervals:
+            team_seconds[team].update(range(interval_start, interval_end))
+
+    return team_seconds, {
+        "available": True,
+        "eventRows": len(rows),
+        "holderSeconds": {
+            side: len(seconds)
+            for side, seconds in team_seconds.items()
+        },
+    }
+
+
+def classify_game_state(gold_diff: int, threshold: int = GOLD_DIFF_AHEAD_THRESHOLD) -> str:
+    if gold_diff >= threshold:
+        return "ahead"
+    if gold_diff <= -threshold:
+        return "behind"
+    return "even"
+
+
+def enrich_instances_with_placement_context(
+    instances: list[dict],
+    networth_by_second: dict[int, dict[str, int]],
+    aegis_seconds_by_team: dict[str, set[int]],
+) -> None:
+    for inst in instances:
+        team = inst.get("team")
+        if team not in {"radiant", "dire"}:
+            continue
+        second = int(inst.get("start") or 0)
+        enemy = enemy_side(team)
+        team_networth = int((networth_by_second.get(second) or {}).get(team) or 0)
+        enemy_networth = int((networth_by_second.get(second) or {}).get(enemy) or 0)
+        gold_diff = team_networth - enemy_networth
+        game_state = classify_game_state(gold_diff)
+        has_aegis = second in aegis_seconds_by_team.get(team, set())
+        inst["teamNetworth"] = team_networth
+        inst["enemyNetworth"] = enemy_networth
+        inst["goldDiff"] = gold_diff
+        inst["gameState"] = game_state
+        inst["teamHasAegis"] = has_aegis
+        inst["placementContext"] = f"{game_state}_{'aegis' if has_aegis else 'no_aegis'}"
+
+
 def active_wards(wards: list[dict], second: int, team: str | None = None, ward_type: str | None = None) -> list[dict]:
     return [
         ward
@@ -648,12 +782,21 @@ def compute_match(cursor, match_id: int, args, base_grid: VisibilityGrid, cache:
         state["treeDynamicApplied"] = bool(tree_events)
         instances.append(state)
 
+    networth_by_second = load_team_networth_by_second(cursor, match_id, start, end, players)
+    aegis_seconds_by_team, aegis_meta = load_aegis_seconds_by_team(cursor, match_id, end, players)
+    enrich_instances_with_placement_context(instances, networth_by_second, aegis_seconds_by_team)
+
     return {
         "matchId": match_id,
         "matchInfo": match_info,
         "players": [players[slot] for slot in sorted(players)],
         "timeWindow": {"start": start, "end": end},
         "invisibility": invis_meta,
+        "placementContext": {
+            "goldDiffThreshold": GOLD_DIFF_AHEAD_THRESHOLD,
+            "gameStates": ["ahead", "even", "behind"],
+            "aegis": aegis_meta,
+        },
         "treeEvents": {
             "rowsAccepted": len(tree_events),
             "rowsRejected": len(rejected_tree_events),
@@ -908,6 +1051,12 @@ def compact_instance(item: dict) -> dict:
         "scoreBreakdown",
         "sampleSightings",
         "firstContacts",
+        "teamNetworth",
+        "enemyNetworth",
+        "goldDiff",
+        "gameState",
+        "teamHasAegis",
+        "placementContext",
     ]
     return {key: item.get(key) for key in keys if key in item}
 
