@@ -8,8 +8,10 @@ import uuid
 import urllib.request
 import urllib.error
 import urllib.parse
+import multiprocessing as mp
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -36,6 +38,10 @@ from compute_ward_hero_visibility import (  # noqa: E402
     resolve_team_side,
 )
 import compute_ward_value_metrics as ward_value  # noqa: E402
+
+# 让 backend 目录可被 import（含子进程 worker 通过限定名反序列化时的 import）。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import match_worker  # noqa: E402
 
 
 # 从 db_settings.json 加载默认数据库配置（当环境变量未设置时使用）
@@ -69,6 +75,31 @@ DEFAULT_CACHE_ROOT = str(PROJECT_ROOT / "var" / "web_cache") if os.environ.get("
 CACHE_ROOT = Path(_env_or_config("DOTA_CACHE_ROOT", DEFAULT_CACHE_ROOT))
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=int(_env_or_config("DOTA_JOB_WORKERS", "2")))
 JOB_LOCK = Lock()
+
+# 多进程计算池：单场眼位计算是纯 Python（受 GIL 限制），用多进程绕过 GIL 吃满多核。
+# DOTA_COMPUTE_PROCS<=1 时退回单进程串行路径。
+DOTA_COMPUTE_PROCS = int(_env_or_config("DOTA_COMPUTE_PROCS", "3"))
+_COMPUTE_POOL: ProcessPoolExecutor | None = None
+_COMPUTE_POOL_LOCK = Lock()
+
+
+def get_compute_pool() -> ProcessPoolExecutor | None:
+    """惰性创建全局进程池；创建失败或禁用时返回 None（调用方回退串行）。"""
+    global _COMPUTE_POOL
+    if DOTA_COMPUTE_PROCS <= 1:
+        return None
+    if _COMPUTE_POOL is not None:
+        return _COMPUTE_POOL
+    with _COMPUTE_POOL_LOCK:
+        if _COMPUTE_POOL is None:
+            for method in ("forkserver", "spawn", "fork"):
+                try:
+                    ctx = mp.get_context(method)
+                    _COMPUTE_POOL = ProcessPoolExecutor(max_workers=DOTA_COMPUTE_PROCS, mp_context=ctx)
+                    break
+                except (ValueError, OSError):
+                    continue
+    return _COMPUTE_POOL
 JOBS: dict[str, dict] = {}
 MAX_JOBS = 100
 
@@ -84,6 +115,9 @@ TEAM_DIRECTORY_TTL = 24 * 3600
 PREWARM_HISTORY_FILE = "prewarm_history.json"
 PREWARMED_TEAMS_MANIFEST_FILE = "prewarmed_teams.json"
 PREWARM_HISTORY_LOCK = Lock()
+# 单独的锁保护战队清单 manifest：save_prewarm_record 会在持有 PREWARM_HISTORY_LOCK
+# 时调用 upsert_prewarmed_team_entry，若两者共用同一把非重入锁会造成同线程自死锁。
+PREWARMED_TEAMS_LOCK = Lock()
 MAX_PREWARM_HISTORY = 30
 MATCH_WARD_CACHE_VERSION = "match-ward-v1"
 _MATCH_WARD_LOCKS: dict[str, Lock] = {}
@@ -833,6 +867,182 @@ def ward_value_args(payload: WardValueRequest) -> SimpleNamespace:
 
 
 def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
+    """点位库计算入口：优先用多进程并行算各场比赛，进程池不可用时回退串行。"""
+    pool = get_compute_pool()
+    if pool is None:
+        return _ward_value_report_serial(payload, progress)
+    try:
+        return _ward_value_report_parallel(payload, pool, progress)
+    except BrokenProcessPool as exc:
+        # 仅在进程池本身损坏（子进程被杀等）时降级串行，避免掩盖真实数据错误。
+        # 损坏的池不会自愈，重置全局引用，让后续请求重建一个新池。
+        global _COMPUTE_POOL
+        with _COMPUTE_POOL_LOCK:
+            if _COMPUTE_POOL is pool:
+                try:
+                    pool.shutdown(wait=False)
+                except Exception:
+                    pass
+                _COMPUTE_POOL = None
+        if progress:
+            progress({"phase": "match", "message": f"并行计算不可用，回退串行：{exc}"})
+        return _ward_value_report_serial(payload, progress)
+
+
+def _persist_and_load_match_raw(match_id: int, args, worker_result: dict) -> dict:
+    """把 worker 计算出的单场原始结果写入缓存，并读回序列化后的标准结构。
+
+    与 load_or_compute_match_raw 的落盘/读回逻辑保持一致，确保并行/串行结果同构。
+    """
+    match = {
+        "invisibility": worker_result.get("invisibility"),
+        "timeWindow": worker_result.get("timeWindow"),
+        "instances": worker_result.get("instances") or [],
+    }
+    write_match_ward_cache(match_id, args.start, args.end, match)
+    return read_match_ward_cache(match_id, args.start, args.end) or {
+        "matchId": int(match_id),
+        "invisibility": match.get("invisibility"),
+        "timeWindow": match.get("timeWindow"),
+        "instances": [_serialize_match_instance(item) for item in match.get("instances") or []],
+    }
+
+
+def _finalize_ward_value_report(
+    payload: WardValueRequest, args, matches: list[dict], all_instances: list[dict], progress=None
+) -> dict:
+    """串行/并行路径共用的收尾：评分、聚类、排行榜与报告组装。"""
+    invisibility_available = all(
+        (match.get("invisibility") or {}).get("available", False) for match in matches
+    ) if matches else False
+    if progress:
+        progress({"phase": "scoring", "message": "正在评分和聚类点位", "percent": 96})
+    ward_value.score_instances(all_instances, invisibility_available)
+    instances = ward_value.finalize_instances(all_instances)
+    spots = ward_value.cluster_spots(instances, payload.clusterEps)
+    projection = ward_value.load_projection(Path(args.projection_calibration))
+    for spot in spots:
+        spot["pixel"] = ward_value.world_to_pixel(spot["centerWorldX"], spot["centerWorldY"], projection)
+    compact_instances = [ward_value.compact_instance(item) for item in instances]
+    leaderboards = ward_value.build_leaderboards(compact_instances, spots)
+    spot_details = ward_value.build_spot_details(spots, instances)
+    spot_leaderboards = build_spot_leaderboards(spot_details)
+    if progress:
+        progress({"phase": "finished", "message": "点位库计算完成", "percent": 100})
+    return {
+        "source": {
+            "database": DEFAULT_DB,
+            "teamTag": payload.teamTag,
+            "grid": project_path(Path(args.grid)),
+            "cache": project_path(Path(args.cache)),
+            "treePoints": project_path(Path(args.tree_points)),
+            "map": map_config(),
+            "mapVersion": ward_value.MAP_VERSION,
+            "observerRadius": ward_value.OBSERVER_RADIUS,
+            "sentryRadius": ward_value.SENTRY_RADIUS,
+            "clusterEpsWorld": payload.clusterEps,
+            "invisibilityRule": "invisibility_modifier=true requires allied sentry coverage before observer sight counts",
+        },
+        "summary": {
+            "matchCount": len(matches),
+            "matches": [int(match_id) for match_id in payload.matchIds],
+            "matchCacheHits": sum(1 for item in matches if item.get("matchCacheHit")),
+            "instanceCount": len(instances),
+            "observerCount": sum(1 for item in instances if item["wardType"] == "obs"),
+            "sentryCount": sum(1 for item in instances if item["wardType"] == "sen"),
+            "spotCount": len(spots),
+            "invisibilityDataAvailable": invisibility_available,
+        },
+        "matches": matches,
+        "instances": compact_instances,
+        "spots": spots,
+        "spotDetails": spot_details,
+        "leaderboards": leaderboards,
+        "spotLeaderboards": spot_leaderboards,
+    }
+
+
+def _ward_value_report_parallel(payload: WardValueRequest, pool: ProcessPoolExecutor, progress=None) -> dict:
+    """多进程并行：各场比赛在独立进程内计算，主进程负责缓存读写与汇总。"""
+    args = ward_value_args(payload)
+    args_dict = dict(vars(args))
+    db_cfg = db_config()
+    match_ids = [int(match_id) for match_id in payload.matchIds]
+    total_matches = len(match_ids)
+
+    match_infos: dict[int, dict] = {}
+    match_raw_by_id: dict[int, dict] = {}
+    cache_hit_by_id: dict[int, bool] = {}
+    misses: list[int] = []
+
+    # 主进程一次性取各场 match_info（解析 team_side 用）并区分缓存命中/未命中。
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            for match_id in match_ids:
+                try:
+                    conn.ping(reconnect=True)
+                except Exception:
+                    pass
+                match_infos[match_id] = ward_value.load_match_info(cursor, match_id)
+                cached = None if payload.forceRefresh else read_match_ward_cache(match_id, args.start, args.end)
+                if cached is not None:
+                    match_raw_by_id[match_id] = cached
+                    cache_hit_by_id[match_id] = True
+                else:
+                    misses.append(match_id)
+
+    done = total_matches - len(misses)
+
+    def emit_progress() -> None:
+        if not progress:
+            return
+        progress({
+            "phase": "match",
+            "message": f"已完成 {done}/{total_matches} 场",
+            "currentMatch": done,
+            "totalMatches": total_matches,
+            "percent": round(done / max(1, total_matches) * 100, 1),
+        })
+
+    emit_progress()
+
+    if misses:
+        futures = {
+            pool.submit(match_worker.compute_match_raw, match_id, args_dict, db_cfg): match_id
+            for match_id in misses
+        }
+        try:
+            for future in as_completed(futures):
+                match_id = futures[future]
+                result = future.result()
+                match_raw_by_id[match_id] = _persist_and_load_match_raw(match_id, args, result)
+                cache_hit_by_id[match_id] = False
+                done += 1
+                emit_progress()
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+
+    matches: list[dict] = []
+    all_instances: list[dict] = []
+    for match_id in match_ids:
+        match_raw = match_raw_by_id[match_id]
+        team_side = resolve_team_side(match_infos[match_id], payload.teamTag)
+        filtered_instances = [
+            _ensure_score_fields({**item})
+            for item in (match_raw.get("instances") or [])
+            if item.get("team") == team_side
+        ]
+        match_summary = _ward_match_summary(match_raw, match_id, payload.teamTag, team_side)
+        match_summary["matchCacheHit"] = cache_hit_by_id[match_id]
+        matches.append(match_summary)
+        all_instances.extend(filtered_instances)
+
+    return _finalize_ward_value_report(payload, args, matches, all_instances, progress)
+
+
+def _ward_value_report_serial(payload: WardValueRequest, progress=None) -> dict:
     grid, cache = grid_and_cache()
     tree_id_cells = ward_value_tree_cells()
     args = ward_value_args(payload)
@@ -842,6 +1052,12 @@ def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
     with connect() as conn:
         with conn.cursor() as cursor:
             for match_index, match_id in enumerate(payload.matchIds):
+                # 长时间预热会让 DB 连接被服务器/网络超时关闭（InterfaceError: (0, '')）。
+                # 每场开始前 ping 一次，断线自动重连，保证长任务稳定。
+                try:
+                    conn.ping(reconnect=True)
+                except Exception:
+                    pass
                 match_info = ward_value.load_match_info(cursor, int(match_id))
                 team_side = resolve_team_side(match_info, payload.teamTag)
                 if progress:
@@ -891,54 +1107,7 @@ def ward_value_report(payload: WardValueRequest, progress=None) -> dict:
                 matches.append(match_summary)
                 all_instances.extend(filtered_instances)
 
-    invisibility_available = all(
-        (match.get("invisibility") or {}).get("available", False) for match in matches
-    ) if matches else False
-    if progress:
-        progress({"phase": "scoring", "message": "正在评分和聚类点位", "percent": 96})
-    ward_value.score_instances(all_instances, invisibility_available)
-    instances = ward_value.finalize_instances(all_instances)
-    spots = ward_value.cluster_spots(instances, payload.clusterEps)
-    projection = ward_value.load_projection(Path(args.projection_calibration))
-    for spot in spots:
-        spot["pixel"] = ward_value.world_to_pixel(spot["centerWorldX"], spot["centerWorldY"], projection)
-    compact_instances = [ward_value.compact_instance(item) for item in instances]
-    leaderboards = ward_value.build_leaderboards(compact_instances, spots)
-    spot_details = ward_value.build_spot_details(spots, instances)
-    spot_leaderboards = build_spot_leaderboards(spot_details)
-    if progress:
-        progress({"phase": "finished", "message": "点位库计算完成", "percent": 100})
-    return {
-        "source": {
-            "database": DEFAULT_DB,
-            "teamTag": payload.teamTag,
-            "grid": project_path(Path(args.grid)),
-            "cache": project_path(Path(args.cache)),
-            "treePoints": project_path(Path(args.tree_points)),
-            "map": map_config(),
-            "mapVersion": ward_value.MAP_VERSION,
-            "observerRadius": ward_value.OBSERVER_RADIUS,
-            "sentryRadius": ward_value.SENTRY_RADIUS,
-            "clusterEpsWorld": payload.clusterEps,
-            "invisibilityRule": "invisibility_modifier=true requires allied sentry coverage before observer sight counts",
-        },
-        "summary": {
-            "matchCount": len(matches),
-            "matches": [int(match_id) for match_id in payload.matchIds],
-            "matchCacheHits": sum(1 for item in matches if item.get("matchCacheHit")),
-            "instanceCount": len(instances),
-            "observerCount": sum(1 for item in instances if item["wardType"] == "obs"),
-            "sentryCount": sum(1 for item in instances if item["wardType"] == "sen"),
-            "spotCount": len(spots),
-            "invisibilityDataAvailable": invisibility_available,
-        },
-        "matches": matches,
-        "instances": compact_instances,
-        "spots": spots,
-        "spotDetails": spot_details,
-        "leaderboards": leaderboards,
-        "spotLeaderboards": spot_leaderboards,
-    }
+    return _finalize_ward_value_report(payload, args, matches, all_instances, progress)
 
 
 def build_spot_leaderboards(spots: list[dict]) -> dict:
@@ -1512,14 +1681,41 @@ def prewarm_report(payload: PrewarmRequest, progress=None) -> dict:
                 forceRefresh=payload.forceRefresh,
                 clusterEps=payload.clusterEps,
             )
-            report = cached_ward_value_report(wv_req, sub_progress(label))
+            try:
+                report = cached_ward_value_report(wv_req, sub_progress(label))
+            except Exception as exc:
+                # 单队失败不拖垮整批：记录错误并继续下一队，已完成的队保持不变。
+                ward_value_results.append({
+                    "teamTag": team["teamTag"],
+                    "matchIds": team["matchIds"],
+                    "status": "error",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                })
+                step_index += 1
+                continue
+            summary = report.get("summary") or {}
             ward_value_results.append({
                 "teamTag": team["teamTag"],
                 "matchIds": team["matchIds"],
                 "status": "ok",
                 "cacheHit": bool((report.get("cache") or {}).get("hit")),
-                "spotCount": (report.get("summary") or {}).get("spotCount"),
-                "instanceCount": (report.get("summary") or {}).get("instanceCount"),
+                "spotCount": summary.get("spotCount"),
+                "instanceCount": summary.get("instanceCount"),
+            })
+            # 每队算完立即写入 manifest，中途失败也不会丢失已完成的战队。
+            upsert_prewarmed_team_entry({
+                "teamTag": team["teamTag"],
+                "teamId": team.get("teamId"),
+                "matchIds": team["matchIds"],
+                "radiantCount": team.get("radiantCount"),
+                "direCount": team.get("direCount"),
+                "recent": payload.recent,
+                "start": payload.start,
+                "end": payload.end,
+                "clusterEps": payload.clusterEps,
+                "spotCount": summary.get("spotCount"),
+                "instanceCount": summary.get("instanceCount"),
+                "updatedAt": utc_now_iso(),
             })
             step_index += 1
 
@@ -1542,13 +1738,21 @@ def prewarm_report(payload: PrewarmRequest, progress=None) -> dict:
             forceRefresh=payload.forceRefresh,
             clusterEps=payload.clusterEps,
         )
-        report = cached_team_comparison_report(cmp_req)
-        comparison_result = {
-            "teams": [{"teamTag": team["teamTag"], "matchIds": team["matchIds"]} for team in cmp_teams],
-            "status": "ok",
-            "cacheHit": bool((report.get("cache") or {}).get("hit")),
-            "spotCount": (report.get("summary") or {}).get("totalMapSpots"),
-        }
+        try:
+            report = cached_team_comparison_report(cmp_req)
+            comparison_result = {
+                "teams": [{"teamTag": team["teamTag"], "matchIds": team["matchIds"]} for team in cmp_teams],
+                "status": "ok",
+                "cacheHit": bool((report.get("cache") or {}).get("hit")),
+                "spotCount": (report.get("summary") or {}).get("totalMapSpots"),
+            }
+        except Exception as exc:
+            # 对比失败不影响已保存的各队点位库。
+            comparison_result = {
+                "teams": [{"teamTag": team["teamTag"], "matchIds": team["matchIds"]} for team in cmp_teams],
+                "status": "error",
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
         step_index += 1
 
     if progress:
@@ -1677,7 +1881,7 @@ def upsert_prewarmed_team_entry(entry: dict) -> None:
     tag = (entry.get("teamTag") or "").strip()
     if not tag:
         return
-    with PREWARM_HISTORY_LOCK:
+    with PREWARMED_TEAMS_LOCK:
         data = _load_prewarmed_teams_manifest()
         data.setdefault("teams", {})[tag.lower()] = entry
         _save_prewarmed_teams_manifest(data)
