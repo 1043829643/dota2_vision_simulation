@@ -589,6 +589,20 @@
       border-radius: 6px; border: none; background: rgba(255,255,255,0.06); color: var(--muted);
     }
     .team-chip .chip-x:hover { background: rgba(242,106,106,0.25); color: #ffd0d0; box-shadow: none; }
+    .cmp-team-picker { display: flex; flex-wrap: wrap; gap: 10px; }
+    .cmp-team-option {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-radius: 10px; min-height: 0;
+      border: 1px solid var(--line); background: rgba(255,255,255,0.03);
+      color: var(--text, #dfe7f0); font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .cmp-team-option:hover { border-color: rgba(244,201,92,0.55); }
+    .cmp-team-option.selected {
+      border-color: rgba(76,208,138,0.7);
+      background: rgba(76,208,138,0.12);
+      box-shadow: 0 0 0 1px rgba(76,208,138,0.35) inset;
+    }
+    .cmp-team-option-name { letter-spacing: 0.3px; }
     .match-chip {
       display: inline-flex; align-items: center;
       padding: 3px 8px; margin: 3px 4px 3px 0;
@@ -879,23 +893,13 @@
         <div class="toolbar">
           <div>
             <h2>多战队眼位对比</h2>
-            <div class="subtitle">添加 2-6 支战队，每队自动取「最近 N 场天辉 + 最近 N 场夜魇」。对比复用各队独立点位库，横向展示 KPI、Top 点位与地图叠加。可用上方阵营切换分别看天辉/夜魇。</div>
+            <div class="subtitle">从下方已预热的战队里点击头像，选择 2-6 支进行对比（直接复用预热好的点位库）。想加入新战队？请先到「预热计算」把它算好。可用上方阵营切换分别看天辉/夜魇。</div>
           </div>
         </div>
-        <div class="quick-row" style="margin-top:14px;border-top:none;padding-top:0">
-          <div style="min-width:180px">
-            <label for="cmpTeamTag">战队 Tag</label>
-            <input id="cmpTeamTag" placeholder="搜战队名或 Tag" />
-          </div>
-          <div style="width:140px">
-            <label for="cmpRecent">每侧最近场数</label>
-            <input id="cmpRecent" type="number" min="1" max="50" value="10" />
-          </div>
-          <div class="actions" style="align-self:end">
-            <button id="cmpAddTeam" class="primary">添加战队</button>
-            <button id="cmpCompute" disabled>计算对比</button>
-            <button id="cmpClear" class="ghost">清空</button>
-          </div>
+        <div id="cmpTeamPicker" class="cmp-team-picker" style="margin-top:14px">加载已预热战队中…</div>
+        <div class="actions" style="margin-top:12px">
+          <button id="cmpCompute" disabled>计算对比</button>
+          <button id="cmpClear" class="ghost">清空选择</button>
         </div>
         <div id="cmpTeamChips" class="pill-row" style="margin-top:12px"></div>
       </div>
@@ -1043,9 +1047,7 @@
       detailsContent: document.getElementById("detailsContent"),
       computeWardValue: document.getElementById("computeWardValue"),
       wardValueContent: document.getElementById("wardValueContent"),
-      cmpTeamTag: document.getElementById("cmpTeamTag"),
-      cmpRecent: document.getElementById("cmpRecent"),
-      cmpAddTeam: document.getElementById("cmpAddTeam"),
+      cmpTeamPicker: document.getElementById("cmpTeamPicker"),
       cmpCompute: document.getElementById("cmpCompute"),
       cmpClear: document.getElementById("cmpClear"),
       cmpTeamChips: document.getElementById("cmpTeamChips"),
@@ -2534,51 +2536,66 @@
     function removeCmpTeam(tag) {
       state.comparisonTeams = state.comparisonTeams.filter(team => team.teamTag.toLowerCase() !== String(tag).toLowerCase());
       renderCmpChips();
+      renderCmpTeamPicker();
     }
 
-    async function addCmpTeam() {
-      const tag = el.cmpTeamTag.value.trim();
-      if (!tag) {
-        setStatus("请输入要添加的战队 Tag。", true);
+    // 只允许从已预热战队里点选（复用预热好的点位库/单场缓存）。
+    function renderCmpTeamPicker() {
+      if (!el.cmpTeamPicker) return;
+      const teams = state.prewarmHistory || [];
+      if (!teams.length) {
+        el.cmpTeamPicker.className = "empty";
+        el.cmpTeamPicker.innerHTML = "还没有已预热的战队。请先到「预热计算」把战队算好，再回到这里点击头像选择对比。";
+        return;
+      }
+      el.cmpTeamPicker.className = "cmp-team-picker";
+      const selected = new Set(state.comparisonTeams.map(team => team.teamTag.toLowerCase()));
+      el.cmpTeamPicker.innerHTML = teams.map(team => {
+        const tag = String(team.teamTag || "");
+        const isSelected = selected.has(tag.toLowerCase());
+        const sideText = (team.radiantCount != null && team.direCount != null)
+          ? `天辉 ${team.radiantCount} / 夜魇 ${team.direCount}`
+          : `${(team.matchIds || []).length} 场`;
+        return `
+        <button type="button" class="cmp-team-option${isSelected ? " selected" : ""}" data-cmp-pick="${tag}" title="${tag.toUpperCase()}">
+          ${teamLogoHtml(tag, true)}
+          <span class="cmp-team-option-name">${tag.toUpperCase()}</span>
+          <span class="muted" style="font-size:11px;font-weight:500">${sideText}</span>
+        </button>`;
+      }).join("");
+      for (const button of el.cmpTeamPicker.querySelectorAll("[data-cmp-pick]")) {
+        button.addEventListener("click", () => toggleCmpTeam(button.getAttribute("data-cmp-pick")));
+      }
+      hydrateTeamLogos();
+    }
+
+    function toggleCmpTeam(teamTag) {
+      const low = String(teamTag).toLowerCase();
+      const already = state.comparisonTeams.find(team => team.teamTag.toLowerCase() === low);
+      if (already) {
+        state.comparisonTeams = state.comparisonTeams.filter(team => team.teamTag.toLowerCase() !== low);
+        renderCmpTeamPicker();
+        renderCmpChips();
         return;
       }
       if (state.comparisonTeams.length >= 6) {
         setStatus("最多对比 6 支战队。", true);
         return;
       }
-      if (state.comparisonTeams.some(team => team.teamTag.toLowerCase() === tag.toLowerCase())) {
-        setStatus(`${tag.toUpperCase()} 已在对比列表中。`, true);
+      const entry = (state.prewarmHistory || []).find(team => String(team.teamTag).toLowerCase() === low);
+      if (!entry || !(entry.matchIds || []).length) {
+        setStatus("该战队没有可用的预热比赛。", true);
         return;
       }
-      const recent = Math.max(1, Math.min(50, Number(el.cmpRecent.value || 10)));
-      const teamId = el.cmpTeamTag.dataset.teamId || "";
-      setStatus(`正在拉取 ${tag.toUpperCase()} 每侧最近 ${recent} 场...`);
-      el.cmpAddTeam.disabled = true;
-      try {
-        const qs = new URLSearchParams({ team_tag: tag, limit: String(recent) });
-        if (teamId) qs.set("team_id", teamId);
-        const payload = await api(`/api/team/recent-matches?${qs.toString()}`);
-        const matchIds = payload.combined || [];
-        if (!matchIds.length) {
-          setStatus(`没有查到 ${tag.toUpperCase()} 的比赛。`, true);
-          return;
-        }
-        state.comparisonTeams.push({
-          teamTag: tag,
-          teamId: teamId || null,
-          matchIds,
-          radiantCount: payload.radiantCount,
-          direCount: payload.direCount,
-        });
-        el.cmpTeamTag.value = "";
-        delete el.cmpTeamTag.dataset.teamId;
-        renderCmpChips();
-        setStatus(`已添加 ${tag.toUpperCase()}（天辉 ${payload.radiantCount} / 夜魇 ${payload.direCount} 场）。`);
-      } catch (error) {
-        setStatus(error.message, true);
-      } finally {
-        el.cmpAddTeam.disabled = false;
-      }
+      state.comparisonTeams.push({
+        teamTag: entry.teamTag,
+        teamId: entry.teamId || null,
+        matchIds: entry.matchIds,
+        radiantCount: entry.radiantCount,
+        direCount: entry.direCount,
+      });
+      renderCmpTeamPicker();
+      renderCmpChips();
     }
 
     async function computeComparison() {
@@ -2793,6 +2810,7 @@
         const payload = await api("/api/prewarm/teams");
         state.prewarmHistory = payload.teams || [];
         renderPrewarmHistory();
+        renderCmpTeamPicker();
       } catch (error) {
         if (el.prewarmHistory) {
           el.prewarmHistory.innerHTML = `<div class="empty">已算好战队加载失败：${error.message}</div>`;
@@ -3351,8 +3369,8 @@
               <label class="muted" for="cmpWardFilter">眼类型</label>
               <select id="cmpWardFilter" style="width:120px;display:block;margin-top:4px">
                 <option value="all">全部</option>
-                <option value="obs">仅真眼</option>
-                <option value="sen">仅假眼</option>
+                <option value="obs">仅假眼</option>
+                <option value="sen">仅真眼</option>
               </select>
             </div>
             <div class="cmp-time-wrap">
@@ -3477,7 +3495,6 @@
       button.addEventListener("click", () => showSection(button.dataset.section));
     }
     attachTeamSearch(el.teamTag);
-    attachTeamSearch(el.cmpTeamTag);
     attachTeamSearch(el.pwTeamTag);
     el.loadMatches.addEventListener("click", loadMatches);
     el.compute.addEventListener("click", compute);
@@ -3510,12 +3527,12 @@
     });
     el.timePreset.addEventListener("change", renderSearchOverview);
 
-    el.cmpAddTeam.addEventListener("click", addCmpTeam);
     el.cmpCompute.addEventListener("click", computeComparison);
     el.cmpClear.addEventListener("click", () => {
       state.comparisonTeams = [];
       state.comparison = null;
       renderCmpChips();
+      renderCmpTeamPicker();
       renderComparison();
     });
 
@@ -3531,12 +3548,10 @@
       renderPrewarm();
     });
     renderPwChips();
-    el.cmpTeamTag.addEventListener("keydown", event => {
-      if (event.key === "Enter") addCmpTeam();
-    });
 
     renderMatches();
     renderCmpChips();
+    renderCmpTeamPicker();
     loadPrewarmHistory();
   </script>
 </body>
