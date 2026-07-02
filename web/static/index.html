@@ -603,6 +603,51 @@
       box-shadow: 0 0 0 1px rgba(76,208,138,0.35) inset;
     }
     .cmp-team-option-name { letter-spacing: 0.3px; }
+    .analysis-bar {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      flex-wrap: wrap; margin: 10px 0 4px;
+      padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px;
+      background: rgba(255,255,255,0.02);
+    }
+    .analysis-bar .ab-hint { font-size: 13px; color: var(--muted); }
+    .analysis-bar .ab-hint strong { color: var(--text, #dfe7f0); font-weight: 700; }
+    .analysis-bar .ab-context { display: flex; gap: 6px; flex-wrap: wrap; }
+    .ab-context .pill { font-size: 12px; }
+    .help {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; margin-left: 4px; border-radius: 50%;
+      font-size: 10px; font-weight: 700; cursor: help; vertical-align: middle;
+      background: rgba(120,150,190,0.25); color: #c8d6e8; border: 1px solid var(--line);
+    }
+    .home-guide { display: grid; gap: 12px; }
+    .home-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    .home-step {
+      padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+      background: rgba(255,255,255,0.02);
+    }
+    .home-step .num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 700;
+      background: var(--accent, #f4c95c); color: #1a1300; margin-bottom: 6px;
+    }
+    .home-step .st-title { font-weight: 700; margin-bottom: 2px; }
+    .home-step .st-desc { font-size: 12.5px; color: var(--muted); }
+    .home-teams { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+    .insight-block {
+      margin-top: 12px; padding: 12px 14px; border-radius: 12px;
+      border: 1px solid rgba(244,201,92,0.35); background: rgba(244,201,92,0.06);
+    }
+    .insight-block h3 { margin: 0 0 8px; font-size: 14px; }
+    .insight-block ul { margin: 0; padding-left: 18px; }
+    .insight-block li { margin: 3px 0; font-size: 13px; line-height: 1.5; }
+    .glossary { margin: 18px 0 8px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.02); }
+    .glossary > summary { cursor: pointer; padding: 12px 14px; font-weight: 700; list-style: none; }
+    .glossary > summary::-webkit-details-marker { display: none; }
+    .glossary > summary::before { content: "▸ "; color: var(--muted); }
+    .glossary[open] > summary::before { content: "▾ "; }
+    .glossary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; padding: 0 14px 14px; }
+    .glossary-grid .term { font-weight: 700; font-size: 13px; }
+    .glossary-grid .def { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
     .match-chip {
       display: inline-flex; align-items: center;
       padding: 3px 8px; margin: 3px 4px 3px 0;
@@ -780,7 +825,10 @@
             </div>
           </div>
         </div>
-        <div id="status" class="status"></div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button id="btnExample" class="ghost" title="打开一支已算好的战队，直接进入分析">看示例</button>
+          <div id="status" class="status"></div>
+        </div>
       </header>
     </div>
 
@@ -839,8 +887,14 @@
       <button data-section="details">明细与导出</button>
       <button data-section="roadmap">点位库与排行榜</button>
       <button data-section="compare">战队对比</button>
+      <button data-section="aggregate">眼位聚合</button>
       <button data-section="prewarm">预热计算</button>
     </nav>
+
+    <div id="analysisBar" class="analysis-bar">
+      <div class="ab-hint" id="abHint"></div>
+      <div class="ab-context" id="abContext"></div>
+    </div>
 
     <section id="overview" class="section active">
       <div id="overviewContent" class="empty">先搜索战队并选择比赛。计算后这里会显示战队视野概览、数据可信度和核心指标。</div>
@@ -906,6 +960,24 @@
       <div id="compareContent" class="empty" style="margin-top:14px">添加至少两支战队后点击“计算对比”。</div>
     </section>
 
+    <section id="aggregate" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div>
+            <h2>多战队眼位聚合</h2>
+            <div class="subtitle">从下方已预热的战队里点击头像选择若干支，把它们的眼位叠加到同一张地图上，按密度观察「大家常在哪做眼」。<span style="color:#4cd08a">绿色=假眼(Observer)</span>、<span style="color:#58b7ff">蓝色=真眼(Sentry)</span>分开呈现。使用顶部时间段设置。</div>
+          </div>
+        </div>
+        <div id="aggTeamPicker" class="cmp-team-picker" style="margin-top:14px">加载已预热战队中…</div>
+        <div class="actions" style="margin-top:12px">
+          <button id="aggCompute" disabled>聚合眼位</button>
+          <button id="aggClear" class="ghost">清空选择</button>
+        </div>
+        <div id="aggTeamChips" class="pill-row" style="margin-top:12px"></div>
+      </div>
+      <div id="aggregateContent" class="empty" style="margin-top:14px">选择至少一支已预热战队后点击“聚合眼位”。</div>
+    </section>
+
     <section id="prewarm" class="section">
       <div class="panel">
         <div class="toolbar">
@@ -941,6 +1013,11 @@
       <div id="prewarmContent" class="empty" style="margin-top:14px">填入战队 Tag，点击“开始预热”。预热完成后可从结果卡片一键打开对应的点位库或对比。</div>
       <div id="prewarmHistory" style="margin-top:14px"></div>
     </section>
+
+    <details id="glossaryPanel" class="glossary">
+      <summary>名词解释 / 指标怎么读</summary>
+      <div id="glossaryGrid" class="glossary-grid"></div>
+    </details>
   </main>
 
   <script>
@@ -970,6 +1047,10 @@
       comparisonWardType: "all",
       comparisonTimeRange: null,
       comparisonTimeBounds: null,
+      aggregateTeams: [],
+      aggregate: null,
+      aggregateWardType: "all",
+      aggregateSide: "all",
     };
 
     const SIDE_LABEL = { all: "全部", radiant: "天辉", dire: "夜魇" };
@@ -1002,10 +1083,17 @@
         dom.innerHTML = `<div class="chart-fallback">图表库未加载（可能离线）。<br>表格与地图数据仍然可用。</div>`;
         return;
       }
-      const existing = window.echarts.getInstanceByDom(dom);
-      if (existing) existing.dispose();
-      const chart = window.echarts.init(dom, null, { renderer: "canvas" });
-      chart.setOption(option);
+      let chart = window.echarts.getInstanceByDom(dom);
+      if (!chart) {
+        // 若该 id 之前的实例挂在已被替换掉的旧节点上，先释放，避免泄漏。
+        const stale = state.charts.get(id);
+        if (stale && stale.getDom() !== dom) {
+          try { stale.dispose(); } catch (_) {}
+        }
+        chart = window.echarts.init(dom, null, { renderer: "canvas" });
+      }
+      // notMerge=true：与原先 dispose+init 语义一致，但复用实例走增量 diff。
+      chart.setOption(option, true);
       state.charts.set(id, chart);
     }
 
@@ -1052,6 +1140,11 @@
       cmpClear: document.getElementById("cmpClear"),
       cmpTeamChips: document.getElementById("cmpTeamChips"),
       compareContent: document.getElementById("compareContent"),
+      aggTeamPicker: document.getElementById("aggTeamPicker"),
+      aggCompute: document.getElementById("aggCompute"),
+      aggClear: document.getElementById("aggClear"),
+      aggTeamChips: document.getElementById("aggTeamChips"),
+      aggregateContent: document.getElementById("aggregateContent"),
       pwTeamTag: document.getElementById("pwTeamTag"),
       pwRecent: document.getElementById("pwRecent"),
       pwSearchAdd: document.getElementById("pwSearchAdd"),
@@ -1247,6 +1340,141 @@
       }
     }
 
+    const SECTION_NAMES = {
+      overview: "战队概览", matches: "比赛样本", timeline: "单场时间轴",
+      details: "明细与导出", roadmap: "点位库与排行榜", compare: "战队对比",
+      aggregate: "眼位聚合", prewarm: "预热计算",
+    };
+    const SECTION_HINTS = {
+      overview: "这支战队整体视野打得怎么样？先看样本量与核心指标画像；想直接看例子就点下面已算好的战队。",
+      matches: "用哪些比赛来分析？勾选样本后再计算。",
+      timeline: "某颗眼到底逐秒看到了谁？在地图上回放逐秒验证。",
+      details: "哪些英雄被看得最多、哪些眼贡献最大？支持导出 JSON/CSV。",
+      roadmap: "这支队爱在哪做眼、哪些点位最值？看地图分布与点位排行。",
+      compare: "几支战队的做眼风格差在哪？横向对比 KPI、点位与地图叠加。",
+      aggregate: "多支战队的眼位叠加在一起，密度热点在哪？绿=假眼、蓝=真眼分开看。",
+      prewarm: "把战队提前算好写入缓存，之后秒开、也供他人直接查看。",
+    };
+
+    const GLOSSARY = [
+      ["假眼 (Observer)", "提供视野的眼；本工具据其 native FoW 可见格计算真正看到的范围与敌方英雄。"],
+      ["真眼 (Sentry)", "提供真视用于反隐；隐身英雄需同时在假眼可见格内且被己方真眼覆盖才计入被看到。"],
+      ["价值分 (valueScore)", "综合一颗眼看到的敌方英雄秒数、独特英雄、存活等的评分，越高越有价值。"],
+      ["可见秒数", "该眼覆盖到敌方英雄的累计秒数（同一秒多个英雄分别计数）。"],
+      ["真视收益", "真眼覆盖隐身敌人贡献的秒数，反映反隐价值。"],
+      ["被排率 (dewarded)", "眼在自然过期前被敌方排掉的比例，越高说明布眼越易被反。"],
+      ["点位聚类", "把地理位置相近的下眼实例聚成一个「点位」，用于统计该点的习惯与价值。"],
+      ["聚类阈值 (clusterEps)", "判定两次下眼是否属于同一点位的距离阈值，越大越粗。"],
+      ["native FoW", "复用 Valve 的战争迷雾遮挡数据（含地形/树木），逐格判断眼的真实可见范围。"],
+      ["样本置信度", "按参与计算的比赛场数给出的可信度：≥20 高、≥8 中、否则低。"],
+      ["Hero-seconds", "所有眼看到敌方英雄的秒数总和，衡量视野信息量的总盘子。"],
+      ["高价值假眼", "价值分达到高档的假眼数量，占比越高说明布眼越高效。"],
+    ];
+
+    function helpBadge(term) {
+      const found = GLOSSARY.find(([t]) => t.startsWith(term));
+      const def = found ? found[1] : "";
+      return `<span class="help" title="${term}：${def.replace(/"/g, "'")}">?</span>`;
+    }
+
+    function renderGlossary() {
+      const grid = document.getElementById("glossaryGrid");
+      if (!grid) return;
+      grid.innerHTML = GLOSSARY.map(([term, def]) =>
+        `<div><div class="term">${term}</div><div class="def">${def}</div></div>`).join("");
+    }
+
+    function currentSectionId() {
+      const active = document.querySelector("[data-section].active");
+      return active ? active.dataset.section : "overview";
+    }
+
+    function currentTeamLabel() {
+      const src = state.report && state.report.source;
+      if (src && src.teamTag) return String(src.teamTag).toUpperCase();
+      const value = (el.teamTag.value || "").trim();
+      return value ? value.toUpperCase() : "";
+    }
+
+    function renderAnalysisBar(id) {
+      id = id || currentSectionId();
+      const hintEl = document.getElementById("abHint");
+      const ctxEl = document.getElementById("abContext");
+      if (hintEl) {
+        hintEl.innerHTML = SECTION_HINTS[id]
+          ? `<strong>${SECTION_NAMES[id] || ""}</strong> · ${SECTION_HINTS[id]}`
+          : "";
+      }
+      if (!ctxEl) return;
+      const chips = [];
+      if (id === "compare") {
+        const tags = (state.comparison && state.comparison.source && state.comparison.source.teamTags) || [];
+        const count = tags.length || state.comparisonTeams.length;
+        if (count) chips.push(`${count} 支战队`);
+        chips.push(`阵营 ${SIDE_LABEL[state.comparisonSide] || "全部"}`);
+      } else if (id === "aggregate") {
+        const tags = (state.aggregate && state.aggregate.source && state.aggregate.source.teamTags) || [];
+        const count = tags.length || state.aggregateTeams.length;
+        if (count) chips.push(`${count} 支战队`);
+        const wt = state.aggregateWardType;
+        chips.push(`眼型 ${wt === "obs" ? "仅假眼" : wt === "sen" ? "仅真眼" : "全部"}`);
+        chips.push(`阵营 ${SIDE_LABEL[state.aggregateSide] || "全部"}`);
+      } else {
+        const team = currentTeamLabel();
+        if (team) chips.push(team);
+        if (state.report) chips.push(`${(state.report.matches || []).length} 场`);
+        else if (state.selected && state.selected.size) chips.push(`已选 ${state.selected.size}/${state.matches.length} 场`);
+      }
+      chips.push(`时间段 ${el.timePreset.options[el.timePreset.selectedIndex].text}`);
+      ctxEl.innerHTML = chips.map(c => `<span class="pill">${c}</span>`).join("");
+    }
+
+    function renderOverviewHome() {
+      const teams = state.prewarmHistory || [];
+      const gallery = teams.length
+        ? `<div class="home-teams">${teams.map(team => {
+            const tag = String(team.teamTag || "");
+            const sub = (team.radiantCount != null && team.direCount != null)
+              ? `天辉 ${team.radiantCount}/夜魇 ${team.direCount}`
+              : `${(team.matchIds || []).length} 场`;
+            return `<button type="button" class="cmp-team-option" data-home-team="${tag}" title="打开 ${tag.toUpperCase()} 的点位库">
+              ${teamLogoHtml(tag, true)}<span class="cmp-team-option-name">${tag.toUpperCase()}</span>
+              <span class="muted" style="font-size:11px;font-weight:500">${sub}</span></button>`;
+          }).join("")}</div>`
+        : `<div class="empty">还没有已算好的战队。你可以在上方搜索战队并计算，或到「预热计算」把战队算好。</div>`;
+      el.overviewContent.className = "panel";
+      el.overviewContent.innerHTML = `
+        <div class="home-guide">
+          <div>
+            <h2>欢迎使用战队视野分析</h2>
+            <div class="subtitle">三步即可开始。想直接看结果？点下面任意「已算好的战队」即可秒开点位库。</div>
+          </div>
+          <div class="home-steps">
+            <div class="home-step"><div class="num">1</div><div class="st-title">选战队与比赛</div><div class="st-desc">上方输入战队 Tag 搜索，勾选要分析的比赛。</div></div>
+            <div class="home-step"><div class="num">2</div><div class="st-title">计算视野</div><div class="st-desc">点「计算所选比赛」，得到眼位看到的敌方英雄与真眼收益。</div></div>
+            <div class="home-step"><div class="num">3</div><div class="st-title">深入分析</div><div class="st-desc">时间轴逐秒验证、点位库看做眼习惯、对比横评多支战队。</div></div>
+          </div>
+          <div>
+            <h3 style="margin:6px 0">已算好的战队（点击秒开点位库）</h3>
+            ${gallery}
+          </div>
+        </div>`;
+      el.overviewContent.querySelectorAll("[data-home-team]").forEach(btn => {
+        btn.addEventListener("click", () => openPrewarmedTeam(btn.getAttribute("data-home-team")));
+      });
+      hydrateTeamLogos();
+    }
+
+    async function openExample() {
+      const teams = state.prewarmHistory || [];
+      if (!teams.length) {
+        setStatus("还没有已算好的战队可作示例，请先到「预热计算」算一支。", true);
+        showSection("prewarm");
+        return;
+      }
+      await openPrewarmedTeam(teams[0].teamTag);
+    }
+
     function showSection(id) {
       for (const section of document.querySelectorAll(".section")) {
         section.classList.toggle("active", section.id === id);
@@ -1254,6 +1482,7 @@
       for (const button of document.querySelectorAll("[data-section]")) {
         button.classList.toggle("active", button.dataset.section === id);
       }
+      renderAnalysisBar(id);
       requestAnimationFrame(resizeCharts);
     }
 
@@ -1473,8 +1702,8 @@
     function renderSearchOverview() {
       const matches = state.matches;
       if (!matches.length) {
-        el.overviewContent.className = "empty";
-        el.overviewContent.innerHTML = "先搜索战队并选择比赛。计算后这里会显示战队视野概览、数据可信度和核心指标。";
+        renderOverviewHome();
+        renderAnalysisBar();
         return;
       }
       const patches = [...new Set(matches.map(m => m.patchVersion).filter(Boolean))];
@@ -1529,6 +1758,24 @@
       ];
       const radarValues = radarRefs.map(item => Math.min(100, Math.round((item.value / item.ref) * 100)));
       const radarIndicators = radarRefs.map(item => ({ name: item.name, max: 100 }));
+
+      const obsHighPct = observerCount ? Math.round((highValue / observerCount) * 100) : 0;
+      const insights = [];
+      insights.push(`平均每场布置约 <strong>${Math.round(observerCount / mc)}</strong> 假眼 / <strong>${Math.round(sentryCount / mc)}</strong> 真眼。`);
+      insights.push(`高价值假眼占比 <strong>${obsHighPct}%</strong>${obsHighPct >= 40 ? "，布眼效率较高。" : obsHighPct >= 20 ? "，中规中矩。" : "，偏低，多数眼收益有限。"}`);
+      insights.push(`平均每场视野信息量约 <strong>${Math.round((totals.heroSeconds || 0) / mc)}</strong> hero-seconds（看到敌方英雄的总秒数）。`);
+      if ((totals.invisibleHeroSeconds || 0) > 0) {
+        insights.push(`真眼反隐贡献约 <strong>${Math.round((totals.invisibleHeroSeconds || 0) / mc)}</strong> 秒/场。`);
+      }
+      if (matchCount < 8) {
+        insights.push(`样本仅 <strong>${matchCount}</strong> 场，结论仅供参考，建议增加比赛数以提升置信度。`);
+      }
+      const insightHtml = `
+        <div class="insight-block">
+          <h3>关键结论</h3>
+          <ul>${insights.map(text => `<li>${text}</li>`).join("")}</ul>
+        </div>`;
+
       el.overviewContent.className = "panel";
       el.overviewContent.innerHTML = `
         <div class="toolbar">
@@ -1543,16 +1790,17 @@
             <span class="pill">真眼覆盖判断</span>
           </div>
         </div>
+        ${insightHtml}
         <div class="summary-grid">
           ${card("比赛视角", matchCount)}
           ${card("Observer", observerCount)}
           ${card("Sentry", sentryCount)}
-          ${card("Hero-seconds", totals.heroSeconds || 0)}
+          ${card("Hero-seconds" + helpBadge("Hero-seconds"), totals.heroSeconds || 0)}
           ${card("Unique seconds", totals.uniqueSeconds || 0)}
           ${card("Appearances", totals.appearances || 0)}
-          ${card("Invisible seconds", totals.invisibleHeroSeconds || 0)}
+          ${card("Invisible seconds" + helpBadge("真视收益"), totals.invisibleHeroSeconds || 0)}
           ${card("Observer contribution", totals.observerContributionHeroSeconds || 0)}
-          ${card("高价值假眼", highValue)}
+          ${card("高价值假眼" + helpBadge("高价值假眼"), highValue)}
           ${card("低/无收益眼", lowValue)}
           ${card("地图版本", "7.41")}
           ${card("时间段", el.timePreset.options[el.timePreset.selectedIndex].text)}
@@ -1576,6 +1824,7 @@
         { name: "普通", value: normalValue, itemStyle: { color: CHART_COLORS.blue } },
         { name: "低/无收益", value: lowValue, itemStyle: { color: CHART_COLORS.red } },
       ]));
+      renderAnalysisBar();
     }
 
     function loadMapImage() {
@@ -1584,7 +1833,7 @@
           resolve(state.mapImage);
           return;
         }
-        const source = state.report?.source || state.wardValue?.source || state.comparison?.source || null;
+        const source = state.report?.source || state.wardValue?.source || state.comparison?.source || state.aggregate?.source || null;
         const map = source ? source.map : null;
         if (!map || !map.imageUrl) {
           reject(new Error("缺少地图配置"));
@@ -1663,8 +1912,12 @@
     function drawMap(match, t) {
       const canvas = document.querySelector(`[data-map-canvas="${match.matchId}"]`);
       if (!canvas || !state.mapImage) return;
-      canvas.width = state.mapImage.naturalWidth;
-      canvas.height = state.mapImage.naturalHeight;
+      const imgW = state.mapImage.naturalWidth;
+      const imgH = state.mapImage.naturalHeight;
+      if (canvas.width !== imgW || canvas.height !== imgH) {
+        canvas.width = imgW;
+        canvas.height = imgH;
+      }
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(state.mapImage, 0, 0, canvas.width, canvas.height);
@@ -2245,8 +2498,16 @@
       setStatus(`已跳转到 Match ${target.matchId} 的 ${fmtTime(target.time)}，并过滤到眼位 e${target.wardEhandle}。`);
     }
 
+    function stopMatchTimer(matchId) {
+      const handle = state.timers.get(matchId);
+      if (handle) {
+        cancelAnimationFrame(handle.raf);
+        state.timers.delete(matchId);
+      }
+    }
+
     function stopTimers() {
-      for (const timer of state.timers.values()) clearInterval(timer);
+      for (const handle of state.timers.values()) cancelAnimationFrame(handle.raf);
       state.timers.clear();
     }
 
@@ -2279,20 +2540,35 @@
       });
       const speedGroup = document.querySelector(`[data-speed-group="${active.matchId}"]`);
       const baseInterval = 180;
+      // rAF 驱动：按累计时间推进帧，页面隐藏时自动暂停、不会堆积回调。
       const startTimer = () => {
-        const timer = setInterval(() => {
-          let next = Number(slider.value) + 1;
-          if (next > Number(slider.max)) next = Number(slider.min);
-          slider.value = String(next);
-          draw();
-        }, Math.max(40, Math.round(baseInterval / state.playSpeed)));
-        state.timers.set(active.matchId, timer);
+        const handle = { raf: 0 };
+        let last = performance.now();
+        let accumulated = 0;
+        const tick = now => {
+          if (state.timers.get(active.matchId) !== handle) return;
+          const stepMs = Math.max(40, Math.round(baseInterval / state.playSpeed));
+          accumulated += now - last;
+          last = now;
+          // 标签页切回后 rAF 会累积很大时间差，限制一次追赶的帧数，避免瞬间跳跃。
+          if (accumulated > stepMs * 4) accumulated = stepMs;
+          let advanced = false;
+          while (accumulated >= stepMs) {
+            accumulated -= stepMs;
+            let next = Number(slider.value) + 1;
+            if (next > Number(slider.max)) next = Number(slider.min);
+            slider.value = String(next);
+            advanced = true;
+          }
+          if (advanced) draw();
+          handle.raf = requestAnimationFrame(tick);
+        };
+        state.timers.set(active.matchId, handle);
+        handle.raf = requestAnimationFrame(tick);
       };
       play?.addEventListener("click", () => {
-        const existing = state.timers.get(active.matchId);
-        if (existing) {
-          clearInterval(existing);
-          state.timers.delete(active.matchId);
+        if (state.timers.has(active.matchId)) {
+          stopMatchTimer(active.matchId);
           play.textContent = "播放";
           return;
         }
@@ -2307,11 +2583,7 @@
             for (const other of speedGroup.querySelectorAll("[data-speed]")) {
               other.classList.toggle("active", other === button);
             }
-            if (state.timers.get(active.matchId)) {
-              clearInterval(state.timers.get(active.matchId));
-              state.timers.delete(active.matchId);
-              startTimer();
-            }
+            // playSpeed 已被 tick 实时读取，无需重启计时器。
           });
         }
       }
@@ -2811,6 +3083,8 @@
         state.prewarmHistory = payload.teams || [];
         renderPrewarmHistory();
         renderCmpTeamPicker();
+        renderAggTeamPicker();
+        if (!state.matches.length && !state.report) renderOverviewHome();
       } catch (error) {
         if (el.prewarmHistory) {
           el.prewarmHistory.innerHTML = `<div class="empty">已算好战队加载失败：${error.message}</div>`;
@@ -3213,13 +3487,23 @@
           state.comparisonTimeRange = [lo, hi];
           if (minLabel) minLabel.textContent = fmtTime(lo);
           if (maxLabel) maxLabel.textContent = fmtTime(hi);
-          updateComparisonViews();
+          scheduleComparisonUpdate();
         };
         minEl.oninput = sync;
         maxEl.oninput = sync;
         if (minLabel) minLabel.textContent = fmtTime(minEl.value);
         if (maxLabel) maxLabel.textContent = fmtTime(maxEl.value);
       }
+    }
+
+    // 合并高频滑块事件：一帧最多执行一次全量重算/重绘。
+    let _cmpUpdateRaf = 0;
+    function scheduleComparisonUpdate() {
+      if (_cmpUpdateRaf) return;
+      _cmpUpdateRaf = requestAnimationFrame(() => {
+        _cmpUpdateRaf = 0;
+        updateComparisonViews();
+      });
     }
 
     function updateComparisonViews() {
@@ -3252,6 +3536,27 @@
         </tr>`).join("");
       const kpiBody = document.getElementById("cmpKpiBody");
       if (kpiBody) kpiBody.innerHTML = summaryRows;
+
+      const cmpInsight = document.getElementById("cmpInsight");
+      if (cmpInsight) {
+        if (teams.length >= 2) {
+          const top = key => [...teams].sort((a, b) => (b[key] || 0) - (a[key] || 0))[0];
+          const bestVal = top("avgValueScore");
+          const bestSeen = top("avgSeenSeconds");
+          const bestSpots = top("spotCount");
+          const dewardKnown = teams.filter(t => t.dewardRate != null);
+          const worstDeward = dewardKnown.length ? [...dewardKnown].sort((a, b) => b.dewardRate - a.dewardRate)[0] : null;
+          const bullets = [];
+          bullets.push(`均分最高：<strong>${bestVal.teamTag.toUpperCase()}</strong>（${bestVal.avgValueScore}），布眼综合价值领先。`);
+          bullets.push(`看得最多：<strong>${bestSeen.teamTag.toUpperCase()}</strong>，平均每眼可见约 ${bestSeen.avgSeenSeconds}s 敌方英雄。`);
+          bullets.push(`点位最丰富：<strong>${bestSpots.teamTag.toUpperCase()}</strong>，覆盖 ${bestSpots.spotCount} 个不同点位。`);
+          if (worstDeward) bullets.push(`最易被排：<strong>${worstDeward.teamTag.toUpperCase()}</strong>，被排率 ${Math.round(worstDeward.dewardRate * 100)}%。`);
+          cmpInsight.innerHTML = `<h3>差异摘要（按当前筛选）</h3><ul>${bullets.map(b => `<li>${b}</li>`).join("")}</ul>`;
+          cmpInsight.style.display = "";
+        } else {
+          cmpInsight.style.display = "none";
+        }
+      }
 
       const radarIndicators = [
         { name: "价值分", max: 100 },
@@ -3310,6 +3615,7 @@
       state._cmpMapSpotsFiltered = mapSpots;
       drawComparisonMap(null, null, mapSpots);
       hydrateTeamLogos();
+      renderAnalysisBar("compare");
     }
 
     function diagnosisTable(title, rows, hint) {
@@ -3386,6 +3692,7 @@
             </div>
           </div>
           ${hasInstances ? "" : `<div class="empty" style="margin-top:10px">当前对比结果不含实例时间数据，请重新计算对比以启用时间轴筛选。</div>`}
+          <div id="cmpInsight" class="insight-block" style="display:none"></div>
           <div class="viz-grid" style="margin-top:14px">
             <div class="panel" style="background:var(--surface-3)">
               <h3>队级 KPI 雷达</h3>
@@ -3394,7 +3701,7 @@
             <div class="panel" style="background:var(--surface-3);overflow:auto">
               <h3>队级 KPI 表</h3>
               <div class="table-wrap" style="margin-top:8px"><table>
-                <thead><tr><th>战队</th><th>样本场</th><th>实例</th><th>Obs/Sen</th><th>点位</th><th>均分</th><th>可见</th><th>存活</th><th>被排率</th></tr></thead>
+                <thead><tr><th>战队</th><th>样本场</th><th>实例</th><th>Obs/Sen</th><th>点位${helpBadge("点位聚类")}</th><th>均分${helpBadge("价值分")}</th><th>可见${helpBadge("可见秒数")}</th><th>存活</th><th>被排率${helpBadge("被排率")}</th></tr></thead>
                 <tbody id="cmpKpiBody"></tbody>
               </table></div>
             </div>
@@ -3491,6 +3798,292 @@
       canvas.onmouseleave = () => { if (tip) tip.style.display = "none"; canvas.style.cursor = "default"; };
     }
 
+    // ===== 多战队眼位聚合 =====
+    function renderAggTeamPicker() {
+      if (!el.aggTeamPicker) return;
+      const teams = state.prewarmHistory || [];
+      if (!teams.length) {
+        el.aggTeamPicker.className = "empty";
+        el.aggTeamPicker.innerHTML = "还没有已预热的战队。请先到「预热计算」把战队算好，再回到这里叠加眼位。";
+        return;
+      }
+      el.aggTeamPicker.className = "cmp-team-picker";
+      const selected = new Set(state.aggregateTeams.map(t => t.teamTag.toLowerCase()));
+      el.aggTeamPicker.innerHTML = teams.map(team => {
+        const tag = String(team.teamTag || "");
+        const isSelected = selected.has(tag.toLowerCase());
+        const sub = (team.radiantCount != null && team.direCount != null)
+          ? `天辉 ${team.radiantCount}/夜魇 ${team.direCount}` : `${(team.matchIds || []).length} 场`;
+        return `<button type="button" class="cmp-team-option${isSelected ? " selected" : ""}" data-agg-pick="${tag}" title="${tag.toUpperCase()}">
+          ${teamLogoHtml(tag, true)}<span class="cmp-team-option-name">${tag.toUpperCase()}</span>
+          <span class="muted" style="font-size:11px;font-weight:500">${sub}</span></button>`;
+      }).join("");
+      el.aggTeamPicker.querySelectorAll("[data-agg-pick]").forEach(btn =>
+        btn.addEventListener("click", () => toggleAggTeam(btn.getAttribute("data-agg-pick"))));
+      hydrateTeamLogos();
+    }
+
+    function toggleAggTeam(teamTag) {
+      const low = String(teamTag).toLowerCase();
+      const already = state.aggregateTeams.find(t => t.teamTag.toLowerCase() === low);
+      if (already) {
+        state.aggregateTeams = state.aggregateTeams.filter(t => t.teamTag.toLowerCase() !== low);
+      } else {
+        if (state.aggregateTeams.length >= 12) { setStatus("最多叠加 12 支战队。", true); return; }
+        const entry = (state.prewarmHistory || []).find(t => String(t.teamTag).toLowerCase() === low);
+        if (!entry || !(entry.matchIds || []).length) { setStatus("该战队没有可用的预热比赛。", true); return; }
+        state.aggregateTeams.push({ teamTag: entry.teamTag, teamId: entry.teamId || null, matchIds: entry.matchIds });
+      }
+      renderAggTeamPicker();
+      renderAggChips();
+    }
+
+    function removeAggTeam(tag) {
+      state.aggregateTeams = state.aggregateTeams.filter(t => t.teamTag.toLowerCase() !== String(tag).toLowerCase());
+      renderAggTeamPicker();
+      renderAggChips();
+    }
+
+    function renderAggChips() {
+      el.aggCompute.disabled = state.aggregateTeams.length < 1;
+      if (!state.aggregateTeams.length) {
+        el.aggTeamChips.innerHTML = `<span class="muted">还没有选择战队。</span>`;
+        return;
+      }
+      el.aggTeamChips.innerHTML = state.aggregateTeams.map(team => `
+        <span class="team-chip">
+          ${teamLogoHtml(team.teamTag)}${team.teamTag.toUpperCase()}
+          <button class="chip-x" data-remove-agg="${team.teamTag}">×</button>
+        </span>`).join("");
+      el.aggTeamChips.querySelectorAll("[data-remove-agg]").forEach(btn =>
+        btn.addEventListener("click", () => removeAggTeam(btn.dataset.removeAgg)));
+      hydrateTeamLogos();
+    }
+
+    async function computeAggregate() {
+      if (!state.aggregateTeams.length) return;
+      const window = selectedTimeWindow();
+      setStatus(`正在聚合 ${state.aggregateTeams.length} 支战队的眼位...`);
+      el.aggCompute.disabled = true;
+      try {
+        const report = await runJob("/api/teams/ward-comparison", {
+          teams: state.aggregateTeams.map(t => ({ teamTag: t.teamTag, matchIds: t.matchIds })),
+          start: window.start,
+          end: window.end,
+          forceRefresh: el.forceRefresh.checked,
+          clusterEps: 200,
+        }, `正在聚合 ${state.aggregateTeams.length} 支战队的眼位`);
+        state.aggregate = report;
+        state.aggregateWardType = "all";
+        state.aggregateSide = "all";
+        renderAggregate();
+        showSection("aggregate");
+        setStatus(report.cache && report.cache.hit ? "眼位聚合已从缓存读取。" : "眼位聚合完成。");
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        renderAggChips();
+      }
+    }
+
+    function aggAllInstances() {
+      const report = state.aggregate;
+      if (!report || !report.instancesByTeam) return [];
+      const tags = (report.source && report.source.teamTags) || [];
+      return tags.flatMap(tag => report.instancesByTeam[tag] || []);
+    }
+
+    // 跨所有选中战队，把地理相近的下眼按「眼类型 + 粗网格」合并，得到密度点。
+    function aggregateWardSpots(instances, wardType, side, cell = 14) {
+      const buckets = new Map();
+      for (const inst of instances) {
+        if (!inst.pixel) continue;
+        if (wardType !== "all" && inst.wardType !== wardType) continue;
+        if (side !== "all" && inst.team !== side) continue;
+        const gx = Math.round(inst.pixel.x / cell);
+        const gy = Math.round(inst.pixel.y / cell);
+        const key = `${inst.wardType}:${gx}:${gy}`;
+        let bucket = buckets.get(key);
+        if (!bucket) {
+          bucket = { wardType: inst.wardType, sumX: 0, sumY: 0, count: 0, scoreSum: 0, teams: new Set() };
+          buckets.set(key, bucket);
+        }
+        bucket.sumX += inst.pixel.x;
+        bucket.sumY += inst.pixel.y;
+        bucket.count += 1;
+        bucket.scoreSum += Number(inst.valueScore) || 0;
+        bucket.teams.add(inst.teamTag);
+      }
+      return [...buckets.values()].map(bucket => ({
+        wardType: bucket.wardType,
+        pixel: { x: bucket.sumX / bucket.count, y: bucket.sumY / bucket.count },
+        count: bucket.count,
+        avgScore: Math.round(bucket.scoreSum / bucket.count * 100) / 100,
+        teamCount: bucket.teams.size,
+      }));
+    }
+
+    function renderAggregate() {
+      const report = state.aggregate;
+      if (!report) {
+        el.aggregateContent.className = "empty";
+        el.aggregateContent.innerHTML = "选择至少一支已预热战队后点击「聚合眼位」。";
+        return;
+      }
+      const tags = (report.source && report.source.teamTags) || [];
+      el.aggregateContent.className = "";
+      el.aggregateContent.innerHTML = `
+        <div class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>眼位聚合地图</h2>
+              <div class="subtitle">${tags.length} 支战队眼位叠加。点越大表示该位置被布眼次数越多；<span style="color:#4cd08a">绿=假眼</span>、<span style="color:#58b7ff">蓝=真眼</span>。</div>
+            </div>
+            <div class="pill-row" id="aggSummary"></div>
+          </div>
+          <div class="cmp-filters" style="margin-top:8px">
+            <div>
+              <label class="muted" for="aggSideFilter">阵营</label>
+              <select id="aggSideFilter" style="width:120px;display:block;margin-top:4px">
+                <option value="all">全部</option>
+                <option value="radiant">天辉</option>
+                <option value="dire">夜魇</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted" for="aggWardFilter">眼类型</label>
+              <select id="aggWardFilter" style="width:140px;display:block;margin-top:4px">
+                <option value="all">假眼+真眼</option>
+                <option value="obs">仅假眼</option>
+                <option value="sen">仅真眼</option>
+              </select>
+            </div>
+            <div class="pill-row" style="align-self:end">
+              <span class="pill" style="color:#4cd08a">● 假眼 Observer</span>
+              <span class="pill" style="color:#58b7ff">● 真眼 Sentry</span>
+            </div>
+          </div>
+          <div class="pill-row" style="margin-top:8px">${tags.map(t => `<span class="pill">${teamLogoHtml(t)}${t.toUpperCase()}</span>`).join("")}</div>
+        </div>
+        <div class="result-layout" style="margin-top:14px">
+          <article class="panel map-card">
+            <div class="map-tip" id="aggTip"></div>
+            <canvas class="map-canvas" id="aggregateMap" width="851" height="851"></canvas>
+          </article>
+          <article class="panel" style="overflow:auto">
+            <h3>高频眼位 Top</h3>
+            <div class="subtitle" style="margin-top:4px">跨所选战队合并后，最常被布置的位置。</div>
+            <div id="aggTopTable" class="table-wrap" style="margin-top:8px"></div>
+          </article>
+        </div>`;
+
+      const sideSel = document.getElementById("aggSideFilter");
+      const wardSel = document.getElementById("aggWardFilter");
+      if (sideSel) {
+        sideSel.value = state.aggregateSide || "all";
+        sideSel.onchange = () => { state.aggregateSide = sideSel.value; updateAggregateViews(); };
+      }
+      if (wardSel) {
+        wardSel.value = state.aggregateWardType || "all";
+        wardSel.onchange = () => { state.aggregateWardType = wardSel.value; updateAggregateViews(); };
+      }
+
+      updateAggregateViews();
+      hydrateTeamLogos();
+    }
+
+    function updateAggregateViews() {
+      const report = state.aggregate;
+      if (!report) return;
+      const instances = aggAllInstances();
+      const wardType = state.aggregateWardType || "all";
+      const side = state.aggregateSide || "all";
+      const filtered = instances.filter(inst =>
+        (wardType === "all" || inst.wardType === wardType) && (side === "all" || inst.team === side));
+      const obsCount = filtered.filter(inst => inst.wardType === "obs").length;
+      const senCount = filtered.filter(inst => inst.wardType === "sen").length;
+      const spots = aggregateWardSpots(instances, wardType, side);
+
+      const summary = document.getElementById("aggSummary");
+      if (summary) {
+        summary.innerHTML = `
+          <span class="pill">共 ${filtered.length} 颗眼</span>
+          <span class="pill" style="color:#4cd08a">假眼 ${obsCount}</span>
+          <span class="pill" style="color:#58b7ff">真眼 ${senCount}</span>
+          <span class="pill">${spots.length} 个聚合位置</span>`;
+      }
+
+      const topTable = document.getElementById("aggTopTable");
+      if (topTable) {
+        const top = [...spots].sort((a, b) => b.count - a.count).slice(0, 15);
+        topTable.innerHTML = top.length ? `<table>
+          <thead><tr><th>类型</th><th>次数</th><th>参与队</th><th>均分</th></tr></thead>
+          <tbody>${top.map(spot => `<tr>
+            <td><span style="color:${spot.wardType === "obs" ? "#4cd08a" : "#58b7ff"}">${spot.wardType === "obs" ? "假眼" : "真眼"}</span></td>
+            <td>${spot.count}</td><td>${spot.teamCount}</td><td>${spot.avgScore}</td></tr>`).join("")}</tbody>
+        </table>` : `<div class="empty">当前筛选下没有眼位。</div>`;
+      }
+
+      state._aggSpots = spots;
+      drawAggregateMap(spots);
+      renderAnalysisBar("aggregate");
+    }
+
+    async function drawAggregateMap(spots) {
+      if (!state.aggregate) return;
+      try { await loadMapImage(); } catch (error) { setStatus(`地图图片加载失败：${error.message}`, true); return; }
+      const canvas = document.getElementById("aggregateMap");
+      if (!canvas) return;
+      const imgW = state.mapImage.naturalWidth, imgH = state.mapImage.naturalHeight;
+      if (canvas.width !== imgW || canvas.height !== imgH) { canvas.width = imgW; canvas.height = imgH; }
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(state.mapImage, 0, 0, canvas.width, canvas.height);
+      const sx = canvas.width / 851, sy = canvas.height / 851;
+      const maxCount = Math.max(1, ...spots.map(spot => spot.count));
+      // 先画假眼再画真眼，真眼叠在上层更醒目。
+      const order = [...spots].sort((a, b) => (a.wardType === "sen") - (b.wardType === "sen"));
+      for (const spot of order) {
+        if (!spot.pixel) continue;
+        const x = spot.pixel.x * sx, y = spot.pixel.y * sy;
+        const r = Math.max(3, Math.min(20, 3 + Math.sqrt(spot.count) * 2.4));
+        const rgb = spot.wardType === "obs" ? "72,208,127" : "88,183,255";
+        ctx.save();
+        ctx.globalAlpha = 0.35 + 0.5 * (spot.count / maxCount);
+        ctx.shadowColor = `rgba(${rgb},0.9)`;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${rgb},0.85)`;
+        ctx.fill();
+        ctx.restore();
+        ctx.lineWidth = 1.1;
+        ctx.strokeStyle = "rgba(0,0,0,0.7)";
+        ctx.stroke();
+      }
+      const tip = document.getElementById("aggTip");
+      canvas.onmousemove = event => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (event.clientX - rect.left) * canvas.width / rect.width;
+        const y = (event.clientY - rect.top) * canvas.height / rect.height;
+        let best = null, bestD = Infinity;
+        for (const spot of spots) {
+          if (!spot.pixel) continue;
+          const d = Math.hypot(spot.pixel.x * sx - x, spot.pixel.y * sy - y);
+          if (d < bestD) { bestD = d; best = spot; }
+        }
+        if (tip && best && bestD < 24) {
+          tip.style.left = `${event.clientX - rect.left}px`;
+          tip.style.top = `${event.clientY - rect.top}px`;
+          tip.style.display = "block";
+          tip.innerHTML = `<div class="tip-title">${best.wardType === "obs" ? "假眼 Observer" : "真眼 Sentry"}</div>
+            <div class="tip-row">布眼 ${best.count} 次 · ${best.teamCount} 支队 · 均分 ${best.avgScore}</div>`;
+          canvas.style.cursor = "pointer";
+        } else if (tip) { tip.style.display = "none"; canvas.style.cursor = "default"; }
+      };
+      canvas.onmouseleave = () => { if (tip) tip.style.display = "none"; canvas.style.cursor = "default"; };
+    }
+
     for (const button of document.querySelectorAll("[data-section]")) {
       button.addEventListener("click", () => showSection(button.dataset.section));
     }
@@ -3525,7 +4118,8 @@
       renderSearchOverview();
       renderWardValue();
     });
-    el.timePreset.addEventListener("change", renderSearchOverview);
+    el.timePreset.addEventListener("change", () => { renderSearchOverview(); renderAnalysisBar(); });
+    document.getElementById("btnExample")?.addEventListener("click", openExample);
 
     el.cmpCompute.addEventListener("click", computeComparison);
     el.cmpClear.addEventListener("click", () => {
@@ -3534,6 +4128,15 @@
       renderCmpChips();
       renderCmpTeamPicker();
       renderComparison();
+    });
+
+    el.aggCompute.addEventListener("click", computeAggregate);
+    el.aggClear.addEventListener("click", () => {
+      state.aggregateTeams = [];
+      state.aggregate = null;
+      renderAggChips();
+      renderAggTeamPicker();
+      renderAggregate();
     });
 
     el.pwRun.addEventListener("click", runPrewarm);
@@ -3552,6 +4155,11 @@
     renderMatches();
     renderCmpChips();
     renderCmpTeamPicker();
+    renderAggChips();
+    renderAggTeamPicker();
+    renderGlossary();
+    renderSearchOverview();
+    renderAnalysisBar("overview");
     loadPrewarmHistory();
   </script>
 </body>
